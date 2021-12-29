@@ -1,4 +1,4 @@
-use crate::chunk::{Chunk,OpCode};
+use crate::chunk::{Chunk, OpCode};
 
 impl Chunk {
     pub fn disassemble(&self, name: &str) {
@@ -9,10 +9,10 @@ impl Chunk {
         }
     }
 
-    fn disassemble_instruction(&self, offset: usize) -> usize {
+    pub fn disassemble_instruction(&self, offset: usize) -> usize {
         print!("{:04} ", offset);
 
-        if offset > 0 && self.lines[offset] == self.lines[offset-1] {
+        if offset > 0 && self.lines[offset] == self.lines[offset - 1] {
             print!("   | ");
         } else {
             print!("{:4} ", self.lines[offset]);
@@ -20,12 +20,13 @@ impl Chunk {
 
         let instruction = self.code[offset];
         match instruction.try_into() {
-            Ok(OpCode::Return) => {
-                simple_instruction("OP_RETURN", offset)
-            },
-            Ok(OpCode::Constant) => {
-                self.constant_instruction("OP_CONSTANT", offset)
-            },
+            Ok(OpCode::Constant) => self.constant_instruction("OP_CONSTANT", offset),
+            Ok(OpCode::Add) => simple_instruction("OP_ADD", offset),
+            Ok(OpCode::Subtract) => simple_instruction("OP_SUBTRACT", offset),
+            Ok(OpCode::Multiply) => simple_instruction("OP_MULTIPLY", offset),
+            Ok(OpCode::Divide) => simple_instruction("OP_DIVIDE", offset),
+            Ok(OpCode::Negate) => simple_instruction("OP_NEGATE", offset),
+            Ok(OpCode::Return) => simple_instruction("OP_RETURN", offset),
             _other => {
                 println!("Unknown opcode {}", instruction);
                 offset + 1
@@ -34,10 +35,12 @@ impl Chunk {
     }
 
     fn constant_instruction(&self, name: &str, offset: usize) -> usize {
-        let constant = self.code[offset+1] as usize;
-        println!("{:>16} {:4} '{:?}'", name, constant,
-            self.constants[constant]);
-        offset+2
+        let constant = self.code[offset + 1] as usize;
+        println!(
+            "{:>16} {:4} '{:?}'",
+            name, constant, self.constants[constant]
+        );
+        offset + 2
     }
 }
 

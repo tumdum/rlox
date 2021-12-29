@@ -1,4 +1,5 @@
 use crate::value::Value;
+use thiserror::Error;
 
 pub struct Chunk {
     pub code: Vec<u8>,
@@ -26,17 +27,31 @@ impl Chunk {
 #[repr(u8)]
 pub enum OpCode {
     Constant = 0,
-    Return = 1,
+    Add = 1,
+    Subtract = 2,
+    Multiply = 3,
+    Divide = 4,
+    Negate = 5,
+    Return = 6,
 }
 
-impl TryFrom<u8> for OpCode {
-    type Error = ();
+#[derive(Debug, Error)]
+#[error("Invalid op code {0}")]
+pub struct InvalidOpCode(u8);
 
-    fn try_from(b: u8) -> Result<Self, ()> {
+impl TryFrom<u8> for OpCode {
+    type Error = InvalidOpCode;
+
+    fn try_from(b: u8) -> Result<Self, InvalidOpCode> {
         match b {
             0 => Ok(OpCode::Constant),
-            1 => Ok(OpCode::Return),
-            _other => todo!(),
+            1 => Ok(OpCode::Add),
+            2 => Ok(OpCode::Subtract),
+            3 => Ok(OpCode::Multiply),
+            4 => Ok(OpCode::Divide),
+            5 => Ok(OpCode::Negate),
+            6 => Ok(OpCode::Return),
+            other => Err(InvalidOpCode(other))
         }
     }
 }
