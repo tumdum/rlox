@@ -1,6 +1,8 @@
 use crate::value::Value;
+use std::num::TryFromIntError;
 use thiserror::Error;
 
+#[derive(Default, Debug)]
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<Value>,
@@ -21,9 +23,9 @@ impl Chunk {
         self.lines.push(line);
     }
 
-    pub fn add_constant(&mut self, value: Value) -> u8 {
+    pub fn add_constant(&mut self, value: Value) -> Result<u8, TryFromIntError> {
         self.constants.push(value);
-        (self.constants.len() - 1).try_into().unwrap()
+        (self.constants.len() - 1).try_into()
     }
 }
 

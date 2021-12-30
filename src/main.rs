@@ -5,7 +5,7 @@ mod scanner;
 mod value;
 mod vm;
 
-use crate::vm::{repl, run_file, VM};
+use crate::vm::VM;
 use chunk::{Chunk, OpCode};
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -18,11 +18,12 @@ struct Opt {
     script: Option<PathBuf>,
 }
 
-fn main() {
+fn main() -> Result<(), vm::Error> {
     let opt = Opt::from_args();
+    let mut vm = VM::default();
 
     match opt.script {
-        None => repl(),
-        Some(script) => run_file(&script),
-    };
+        None => vm.repl(),
+        Some(script) => vm.run_file(&script),
+    }
 }

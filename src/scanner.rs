@@ -3,7 +3,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use thiserror::Error;
 
-static IDENTIFIERS: Lazy<HashMap<&str, TokenType>> = Lazy::new(|| {
+static KEYWORDS: Lazy<HashMap<&str, TokenType>> = Lazy::new(|| {
     hashmap! {
         "and" => TokenType::And,
         "class" => TokenType::Class,
@@ -24,12 +24,14 @@ static IDENTIFIERS: Lazy<HashMap<&str, TokenType>> = Lazy::new(|| {
     }
 });
 
+#[derive(Debug)]
 pub struct Scanner {
     source: Vec<char>,
     current: usize,
     line: usize,
 }
 
+#[derive(Debug, Clone)]
 pub struct Token {
     pub type_: TokenType,
     pub line: usize,
@@ -37,14 +39,21 @@ pub struct Token {
 }
 
 #[derive(Debug, Error)]
-pub enum Error {
+#[error("Error at line {line}: {detail}")]
+pub struct Error {
+    pub line: usize,
+    pub detail: ErrorDetail,
+}
+
+#[derive(Debug, Error)]
+pub enum ErrorDetail {
     #[error("Unexpected character: '{0}'")]
     UnexpectedCharacter(char),
     #[error("Unterminated string")]
     UnterminatedString,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenType {
     // Single-character tokens.
     LeftParen,
@@ -100,6 +109,10 @@ impl Scanner {
             current: 0,
             line: 1,
         }
+    }
+
+    pub fn line(&self) -> usize {
+        self.line
     }
 
     pub fn scan_token(&mut self) -> Result<Token, Error> {
@@ -162,22 +175,16 @@ impl Scanner {
                 };
                 return Ok(self.make_token(current, tt));
             }
-            '/' => {
-                if self.peek_next() == Some('/') {
-                    while self.peek() != '\n' && !self.is_at_end() {
-                        self.advance();
-                    }
-                } else {
-                    todo!()
-                }
-            }
             '"' => {
                 return self.string();
             }
             _ => {}
         }
 
-        Err(Error::UnexpectedCharacter(c))
+        Err(Error {
+            line: self.line,
+            detail: ErrorDetail::UnexpectedCharacter(c),
+        })
     }
 
     fn is_at_end(&self) -> bool {
@@ -222,6 +229,15 @@ impl Scanner {
                     self.line += 1;
                     self.advance();
                 }
+                '/' => {
+                    if self.peek_next() == Some('/') {
+                        while self.peek() != '\n' && !self.is_at_end() {
+                            self.advance();
+                        }
+                    } else {
+                        todo!()
+                    }
+                }
                 _ => break,
             }
         }
@@ -244,7 +260,10 @@ impl Scanner {
             self.advance();
         }
         if self.is_at_end() {
-            return Err(Error::UnterminatedString);
+            return Err(Error {
+                line: self.line,
+                detail: ErrorDetail::UnterminatedString,
+            });
         }
 
         // The closing quote.
@@ -282,20 +301,7 @@ impl Scanner {
 
     fn identifier_type(&self, start: usize) -> TokenType {
         let key: String = self.source[start..self.current].iter().collect();
-        let keywords: HashMap<&str, TokenType> = hashmap! {
-            "and" => TokenType::And,
-            "class" => TokenType::Class,
-            "else" => TokenType::Else,
-            "if" => TokenType::If,
-            "nil" => TokenType::Nil,
-            "or" => TokenType::Or,
-            "print" => TokenType::Print,
-            "return" => TokenType::Return,
-            "super" => TokenType::Super,
-            "var" => TokenType::Var,
-            "while" => TokenType::While,
-        };
-        keywords
+        KEYWORDS
             .get(key.as_str())
             .cloned()
             .unwrap_or(TokenType::Identifier)

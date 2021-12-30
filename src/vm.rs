@@ -1,5 +1,5 @@
 use crate::chunk::InvalidOpCode;
-use crate::compiler::compile;
+use crate::compiler::Parser;
 use crate::value::Value;
 use crate::{Chunk, OpCode};
 use std::collections::VecDeque;
@@ -20,8 +20,11 @@ macro_rules! binary_op {
 pub enum Error {
     #[error("Run time error: {0}")]
     InvalidOpCode(#[from] InvalidOpCode),
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
 }
 
+#[derive(Default)]
 pub struct VM {
     chunk: Chunk,
     pc: usize,
@@ -30,11 +33,15 @@ pub struct VM {
 
 impl VM {
     pub fn new(chunk: Chunk) -> Self {
-        Self {
-            chunk,
-            pc: 0,
-            stack: VecDeque::new(),
-        }
+        let mut ret = Self::default();
+        ret.set_chunk(chunk);
+        ret
+    }
+
+    pub fn set_chunk(&mut self, chunk: Chunk) {
+        self.chunk = chunk;
+        self.pc = 0;
+        self.stack.clear();
     }
 
     fn read_byte(&mut self) -> u8 {
@@ -91,25 +98,29 @@ impl VM {
             }
         }
     }
-}
 
-pub fn repl() -> Result<(), std::io::Error> {
-    loop {
-        print!("> ");
-        std::io::stdout().flush();
-        let mut line = String::new();
-        std::io::stdin().read_line(&mut line)?;
+    pub fn repl(&mut self) -> Result<(), Error> {
+        loop {
+            print!("> ");
+            std::io::stdout().flush().unwrap();
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line)?;
 
-        interpret(&line);
+            self.interpret(&line).unwrap();
+        }
     }
-}
 
-pub fn run_file(path: &PathBuf) -> Result<(), std::io::Error> {
-    let source = std::fs::read_to_string(path)?;
-    interpret(&source)
-}
+    pub fn run_file(&mut self, path: &PathBuf) -> Result<(), Error> {
+        let source = std::fs::read_to_string(path)?;
+        self.interpret(&source)
+    }
 
-fn interpret(source: &str) -> Result<(), std::io::Error> {
-    compile(source);
-    Ok(())
+    fn interpret(&mut self, source: &str) -> Result<(), Error> {
+        let parser = Parser::new(source);
+        let chunk = parser.compile().unwrap();
+
+        self.set_chunk(chunk);
+
+        self.run()
+    }
 }
