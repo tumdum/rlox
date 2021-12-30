@@ -20,31 +20,31 @@ static RULES: Lazy<HashMap<TokenType, ParseRule>> = Lazy::new(|| {
        TokenType::Semicolon      => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Slash          => ParseRule{prefix: None,                    infix: Some(&Parser::binary), precedence: Precedence::Factor},
        TokenType::Star           => ParseRule{prefix: None,                    infix: Some(&Parser::binary), precedence: Precedence::Factor},
-       TokenType::Bang           => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::BangEqual      => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
+       TokenType::Bang           => ParseRule{prefix: Some(&Parser::unary),    infix: None,                  precedence: Precedence::None},
+       TokenType::BangEqual      => ParseRule{prefix: None,                    infix: Some(&Parser::binary), precedence: Precedence::Equality},
        TokenType::Equal          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::EqualEqual     => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::Greater        => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::GreaterEqual   => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::Less           => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::LessEqual      => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
+       TokenType::EqualEqual     => ParseRule{prefix: None,                    infix: Some(&Parser::binary), precedence: Precedence::Equality},
+       TokenType::Greater        => ParseRule{prefix: None,                    infix: Some(&Parser::binary), precedence: Precedence::Comparison},
+       TokenType::GreaterEqual   => ParseRule{prefix: None,                    infix: Some(&Parser::binary), precedence: Precedence::Comparison},
+       TokenType::Less           => ParseRule{prefix: None,                    infix: Some(&Parser::binary), precedence: Precedence::Comparison},
+       TokenType::LessEqual      => ParseRule{prefix: None,                    infix: Some(&Parser::binary), precedence: Precedence::Comparison},
        TokenType::Identifier     => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::String         => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Number         => ParseRule{prefix: Some(&Parser::number),   infix: None,                  precedence: Precedence::None},
        TokenType::And            => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Class          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Else           => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::False          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
+       TokenType::False          => ParseRule{prefix: Some(&Parser::literal),  infix: None,                  precedence: Precedence::None},
        TokenType::For            => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Fun            => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::If             => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::Nil            => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
+       TokenType::Nil            => ParseRule{prefix: Some(&Parser::literal),  infix: None,                  precedence: Precedence::None},
        TokenType::Or             => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Print          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Return         => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Super          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::This           => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::True           => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
+       TokenType::True           => ParseRule{prefix: Some(&Parser::literal),  infix: None,                  precedence: Precedence::None},
        TokenType::Var            => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::While          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Error          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
@@ -162,6 +162,7 @@ impl Parser {
 
         // Emit the operator instruction
         match operator_type {
+            TokenType::Bang => self.emit_byte(OpCode::Not as u8),
             TokenType::Minus => self.emit_byte(OpCode::Negate as u8),
             _ => unreachable!(),
         }
@@ -172,11 +173,28 @@ impl Parser {
         let rule = self.get_rule(operator_type);
         self.parse_precedence(rule.precedence.next());
 
+        use OpCode::*;
         match operator_type {
-            TokenType::Plus => self.emit_byte(OpCode::Add as u8),
-            TokenType::Minus => self.emit_byte(OpCode::Subtract as u8),
-            TokenType::Star => self.emit_byte(OpCode::Multiply as u8),
-            TokenType::Slash => self.emit_byte(OpCode::Divide as u8),
+            TokenType::BangEqual => self.emit_bytes(Equal as u8, Not as u8),
+            TokenType::EqualEqual => self.emit_byte(Equal as u8),
+            TokenType::Greater => self.emit_byte(Greater as u8),
+            TokenType::GreaterEqual => self.emit_bytes(Less as u8, Not as u8),
+            TokenType::Less => self.emit_byte(Less as u8),
+            TokenType::LessEqual => self.emit_bytes(Greater as u8, Not as u8),
+            TokenType::Plus => self.emit_byte(Add as u8),
+            TokenType::Minus => self.emit_byte(Subtract as u8),
+            TokenType::Star => self.emit_byte(Multiply as u8),
+            TokenType::Slash => self.emit_byte(Divide as u8),
+            _ => unreachable!(),
+        }
+    }
+
+    fn literal(&mut self) {
+        let operator_type = self.previous.as_ref().unwrap().type_;
+        match operator_type {
+            TokenType::False => self.emit_byte(OpCode::False as u8),
+            TokenType::True => self.emit_byte(OpCode::True as u8),
+            TokenType::Nil => self.emit_byte(OpCode::Nil as u8),
             _ => unreachable!(),
         }
     }

@@ -9,10 +9,17 @@ use thiserror::Error;
 
 macro_rules! binary_op {
     ($target: expr, $op: tt) => {{
-        let b = $target.stack.pop_back().unwrap().0;
-        let a = $target.stack.pop_back().unwrap().0;
+        let b = match $target.pop() {
+            Value::Number(b) => b,
+            other => return Err(Error::InvalidOperand("Number".to_owned(), other)),
+        };
+        let a = match $target.pop() {
+            Value::Number(a) => a,
+            other => return Err(Error::InvalidOperand("Number".to_owned(), other)),
+        };
+
         let result = a $op b;
-        $target.stack.push_back(result.into());
+        $target.push(result.into());
     }}
 }
 
@@ -22,6 +29,8 @@ pub enum Error {
     InvalidOpCode(#[from] InvalidOpCode),
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("Invalid operand, expected {0}, got {1:?}")]
+    InvalidOperand(String, Value),
 }
 
 #[derive(Default)]
@@ -64,6 +73,14 @@ impl VM {
         self.chunk.disassemble_instruction(self.pc);
     }
 
+    fn push(&mut self, v: Value) {
+        self.stack.push_back(v);
+    }
+
+    fn pop(&mut self) -> Value {
+        self.stack.pop_back().unwrap()
+    }
+
     pub fn run(&mut self) -> Result<(), Error> {
         loop {
             #[cfg(debug_assertions)]
@@ -71,29 +88,38 @@ impl VM {
 
             match self.read_opcode()? {
                 OpCode::Return => {
-                    let value = self.stack.pop_back().unwrap();
+                    let value = self.pop();
                     println!("{:?}", value);
                     return Ok(());
                 }
-                OpCode::Add => {
-                    binary_op!(self, +);
-                }
-                OpCode::Subtract => {
-                    binary_op!(self, -);
-                }
-                OpCode::Multiply => {
-                    binary_op!(self, *);
-                }
-                OpCode::Divide => {
-                    binary_op!(self, /);
+                OpCode::Greater => binary_op!(self, >),
+                OpCode::Less => binary_op!(self, <),
+                OpCode::Add => binary_op!(self, +),
+                OpCode::Subtract => binary_op!(self, -),
+                OpCode::Multiply => binary_op!(self, *),
+                OpCode::Divide => binary_op!(self, /),
+                OpCode::Not => {
+                    let val = self.pop();
+                    self.push(val.is_falsey().into());
                 }
                 OpCode::Negate => {
-                    let constant = self.stack.pop_back().unwrap();
-                    self.stack.push_back((-constant.0).into());
+                    let constant = self.pop();
+                    match constant {
+                        Value::Number(n) => self.push((-n).into()),
+                        other => return Err(Error::InvalidOperand("Number".to_owned(), other)),
+                    }
                 }
                 OpCode::Constant => {
                     let constant = self.read_constant();
-                    self.stack.push_back(constant);
+                    self.push(constant);
+                }
+                OpCode::Nil => self.push(Value::Nil),
+                OpCode::True => self.push(true.into()),
+                OpCode::False => self.push(false.into()),
+                OpCode::Equal => {
+                    let b = self.pop();
+                    let a = self.pop();
+                    self.push((a == b).into());
                 }
             }
         }

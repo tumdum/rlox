@@ -33,12 +33,19 @@ impl Chunk {
 #[repr(u8)]
 pub enum OpCode {
     Constant = 0,
-    Add = 1,
-    Subtract = 2,
-    Multiply = 3,
-    Divide = 4,
-    Negate = 5,
-    Return = 6,
+    Nil = 1,
+    True = 2,
+    False = 3,
+    Equal = 4,
+    Greater = 5,
+    Less = 6,
+    Add = 7,
+    Subtract = 8,
+    Multiply = 9,
+    Divide = 10,
+    Not = 11,
+    Negate = 12,
+    Return = 13,
 }
 
 #[derive(Debug, Error)]
@@ -51,12 +58,19 @@ impl TryFrom<u8> for OpCode {
     fn try_from(b: u8) -> Result<Self, InvalidOpCode> {
         match b {
             0 => Ok(OpCode::Constant),
-            1 => Ok(OpCode::Add),
-            2 => Ok(OpCode::Subtract),
-            3 => Ok(OpCode::Multiply),
-            4 => Ok(OpCode::Divide),
-            5 => Ok(OpCode::Negate),
-            6 => Ok(OpCode::Return),
+            1 => Ok(OpCode::Nil),
+            2 => Ok(OpCode::True),
+            3 => Ok(OpCode::False),
+            4 => Ok(OpCode::Equal),
+            5 => Ok(OpCode::Greater),
+            6 => Ok(OpCode::Less),
+            7 => Ok(OpCode::Add),
+            8 => Ok(OpCode::Subtract),
+            9 => Ok(OpCode::Multiply),
+            10 => Ok(OpCode::Divide),
+            11 => Ok(OpCode::Not),
+            12 => Ok(OpCode::Negate),
+            13 => Ok(OpCode::Return),
             other => Err(InvalidOpCode(other)),
         }
     }
