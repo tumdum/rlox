@@ -200,4 +200,18 @@ mod tests {
         assert_matches!(vm.interpret("2*3+5"), Ok(Value::Number(11.0)));
         assert_matches!(vm.interpret("-2*(3+5)"), Ok(Value::Number(-16.0)));
     }
+
+    #[test]
+    fn binary() {
+        let mut vm = VM::default();
+        assert_matches!(vm.interpret("1+2==3"), Ok(Value::Boolean(true)));
+        assert_matches!(vm.interpret("true!=false"), Ok(Value::Boolean(true)));
+        assert_matches!(vm.interpret("true==false"), Ok(Value::Boolean(false)));
+        assert_matches!(vm.interpret("2<3"), Ok(Value::Boolean(true)));
+        assert_matches!(vm.interpret("2<=3"), Ok(Value::Boolean(true)));
+        assert_matches!(vm.interpret("2>3"), Ok(Value::Boolean(false)));
+        assert_matches!(vm.interpret("2>=3"), Ok(Value::Boolean(false)));
+
+
+    }
 }
