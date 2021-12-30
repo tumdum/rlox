@@ -9,7 +9,11 @@ pub struct Chunk {
 
 impl Chunk {
     pub fn new() -> Self {
-        Self { code: vec![], constants: vec![], lines: vec![]}
+        Self {
+            code: vec![],
+            constants: vec![],
+            lines: vec![],
+        }
     }
 
     pub fn write(&mut self, byte: u8, line: usize) {
@@ -19,7 +23,7 @@ impl Chunk {
 
     pub fn add_constant(&mut self, value: Value) -> u8 {
         self.constants.push(value);
-        (self.constants.len()-1).try_into().unwrap()
+        (self.constants.len() - 1).try_into().unwrap()
     }
 }
 
@@ -51,8 +55,7 @@ impl TryFrom<u8> for OpCode {
             4 => Ok(OpCode::Divide),
             5 => Ok(OpCode::Negate),
             6 => Ok(OpCode::Return),
-            other => Err(InvalidOpCode(other))
+            other => Err(InvalidOpCode(other)),
         }
     }
 }
-
