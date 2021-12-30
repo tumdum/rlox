@@ -9,11 +9,11 @@ use thiserror::Error;
 
 macro_rules! binary_op {
     ($target: expr, $op: tt) => {{
-        let b = match $target.pop() {
+        let b = match $target.pop()? {
             Value::Number(b) => b,
             other => return Err(Error::InvalidOperand("Number".to_owned(), other)),
         };
-        let a = match $target.pop() {
+        let a = match $target.pop()? {
             Value::Number(a) => a,
             other => return Err(Error::InvalidOperand("Number".to_owned(), other)),
         };
@@ -31,6 +31,10 @@ pub enum Error {
     IoError(#[from] std::io::Error),
     #[error("Invalid operand, expected {0}, got {1:?}")]
     InvalidOperand(String, Value),
+    #[error("Compilation failed")]
+    CompilationFailed,
+    #[error("Pop from empty stack")]
+    PopFromEmptyStack,
 }
 
 #[derive(Default)]
@@ -77,20 +81,20 @@ impl VM {
         self.stack.push_back(v);
     }
 
-    fn pop(&mut self) -> Value {
-        self.stack.pop_back().unwrap()
+    fn pop(&mut self) -> Result<Value, Error> {
+        self.stack.pop_back().ok_or(Error::PopFromEmptyStack)
     }
 
-    pub fn run(&mut self) -> Result<(), Error> {
+    pub fn run(&mut self) -> Result<Value, Error> {
         loop {
             #[cfg(debug_assertions)]
             self.trace();
 
             match self.read_opcode()? {
                 OpCode::Return => {
-                    let value = self.pop();
+                    let value = self.pop()?;
                     println!("{:?}", value);
-                    return Ok(());
+                    return Ok(value);
                 }
                 OpCode::Greater => binary_op!(self, >),
                 OpCode::Less => binary_op!(self, <),
@@ -99,11 +103,11 @@ impl VM {
                 OpCode::Multiply => binary_op!(self, *),
                 OpCode::Divide => binary_op!(self, /),
                 OpCode::Not => {
-                    let val = self.pop();
+                    let val = self.pop()?;
                     self.push(val.is_falsey().into());
                 }
                 OpCode::Negate => {
-                    let constant = self.pop();
+                    let constant = self.pop()?;
                     match constant {
                         Value::Number(n) => self.push((-n).into()),
                         other => return Err(Error::InvalidOperand("Number".to_owned(), other)),
@@ -117,8 +121,8 @@ impl VM {
                 OpCode::True => self.push(true.into()),
                 OpCode::False => self.push(false.into()),
                 OpCode::Equal => {
-                    let b = self.pop();
-                    let a = self.pop();
+                    let b = self.pop()?;
+                    let a = self.pop()?;
                     self.push((a == b).into());
                 }
             }
@@ -128,25 +132,72 @@ impl VM {
     pub fn repl(&mut self) -> Result<(), Error> {
         loop {
             print!("> ");
-            std::io::stdout().flush().unwrap();
+            std::io::stdout().flush()?;
             let mut line = String::new();
             std::io::stdin().read_line(&mut line)?;
 
-            self.interpret(&line).unwrap();
+            self.interpret(&line)?;
         }
     }
 
     pub fn run_file(&mut self, path: &PathBuf) -> Result<(), Error> {
         let source = std::fs::read_to_string(path)?;
-        self.interpret(&source)
+        self.interpret(&source)?;
+        Ok(())
     }
 
-    fn interpret(&mut self, source: &str) -> Result<(), Error> {
+    fn interpret(&mut self, source: &str) -> Result<Value, Error> {
         let parser = Parser::new(source);
-        let chunk = parser.compile().unwrap();
+        let chunk = if let Some(chunk) = parser.compile() {
+            chunk
+        } else {
+            return Err(Error::CompilationFailed);
+        };
 
         self.set_chunk(chunk);
 
         self.run()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_matches::assert_matches;
+
+    #[test]
+    fn literals() {
+        let mut vm = VM::default();
+        assert_matches!(vm.interpret("1"), Ok(Value::Number(1f64)));
+        assert_matches!(vm.interpret("1.1"), Ok(Value::Number(1.1f64)));
+        assert_matches!(vm.interpret("true"), Ok(Value::Boolean(true)));
+        assert_matches!(vm.interpret("false"), Ok(Value::Boolean(false)));
+        assert_matches!(vm.interpret("nil"), Ok(Value::Nil));
+    }
+
+    #[test]
+    fn unary() {
+        let mut vm = VM::default();
+        assert_matches!(vm.interpret("-13.109"), Ok(Value::Number(-13.109f64)));
+        assert_matches!(vm.interpret("-0"), Ok(Value::Number(-0f64)));
+
+        assert_matches!(vm.interpret("!true"), Ok(Value::Boolean(false)));
+        assert_matches!(vm.interpret("!!true"), Ok(Value::Boolean(true)));
+        assert_matches!(vm.interpret("!false"), Ok(Value::Boolean(true)));
+        assert_matches!(vm.interpret("!!false"), Ok(Value::Boolean(false)));
+
+        assert_matches!(vm.interpret("!nil"), Ok(Value::Boolean(true)));
+        assert_matches!(vm.interpret("!!nil"), Ok(Value::Boolean(false)));
+    }
+
+    #[test]
+    fn arithmetic() {
+        let mut vm = VM::default();
+        assert_matches!(vm.interpret("1+2"), Ok(Value::Number(3.0)));
+        assert_matches!(vm.interpret("1-2"), Ok(Value::Number(-1.0)));
+        assert_matches!(vm.interpret("3*2"), Ok(Value::Number(6.0)));
+        assert_matches!(vm.interpret("9.3/3"), Ok(Value::Number(3.1)));
+        assert_matches!(vm.interpret("2*3+5"), Ok(Value::Number(11.0)));
+        assert_matches!(vm.interpret("-2*(3+5)"), Ok(Value::Number(-16.0)));
     }
 }

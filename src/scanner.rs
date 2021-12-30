@@ -235,7 +235,7 @@ impl Scanner {
                             self.advance();
                         }
                     } else {
-                        todo!()
+                        break;
                     }
                 }
                 _ => break,
@@ -244,11 +244,15 @@ impl Scanner {
     }
 
     fn peek(&self) -> char {
-        self.source[self.current]
+        if self.is_at_end() {
+            0 as char
+        } else {
+            self.source[self.current]
+        }
     }
 
     fn peek_next(&self) -> Option<char> {
-        self.source.get(self.current).cloned()
+        self.source.get(self.current + 1).cloned()
     }
 
     fn string(&mut self) -> Result<Token, Error> {
@@ -273,6 +277,7 @@ impl Scanner {
 
     fn number(&mut self) -> Result<Token, Error> {
         let current = self.current - 1;
+        dbg!(self.current, &self.source);
         while self.peek().is_digit(10) {
             self.advance();
         }

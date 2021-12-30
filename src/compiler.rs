@@ -320,5 +320,6 @@ impl Parser {
         }
         self.panic_mode = true;
         eprintln!("[line {}]: Error: {}", line, e);
+        self.had_error = true;
     }
 }
