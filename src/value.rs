@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
+use std::hash::{Hash, Hasher};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -7,7 +8,7 @@ pub enum Error {
     // todo in future
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub enum Obj {
     String(String),
 }
@@ -18,6 +19,27 @@ pub enum Value {
     Number(f64),
     Boolean(bool),
     Obj(*const Obj),
+}
+
+impl Hash for Value {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        use Value::*;
+        match self {
+            Nil => {}
+            Number(f) => {
+                let i: u64 = unsafe { std::mem::transmute(f) };
+                h.write_u64(i);
+            }
+            Boolean(b) => h.write_u8(*b as u8),
+            Obj(ptr) => {
+                let obj: &self::Obj = unsafe { &**ptr };
+                use self::Obj::*;
+                match obj {
+                    String(s) => s.hash(h),
+                }
+            }
+        }
+    }
 }
 
 impl Value {
@@ -46,6 +68,7 @@ impl PartialEq for Value {
             (Nil, Nil) => true,
             (Number(l), Number(r)) => l == r,
             (Boolean(l), Boolean(r)) => l == r,
+            (Obj(l), Obj(r)) if l == r => true,
             (Obj(l), Obj(r)) => unsafe {
                 let l = &**l;
                 let r = &**r;
@@ -55,6 +78,8 @@ impl PartialEq for Value {
         }
     }
 }
+
+impl Eq for Value {}
 
 impl PartialOrd for Value {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {

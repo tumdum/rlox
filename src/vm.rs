@@ -136,7 +136,7 @@ impl VM {
                             match (l, r) {
                                 (self::Obj::String(l), self::Obj::String(r)) => {
                                     let tmp = format!("{}{}", l, r);
-                                    self.allocator.borrow_mut().make_string(tmp)
+                                    self.allocator.borrow_mut().allocate_string(tmp)
                                 }
                             }
                         },

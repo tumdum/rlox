@@ -157,7 +157,7 @@ impl Parser {
         let s = &self.previous.as_ref().unwrap().value;
         let l = s.len();
         let s: String = s.chars().skip(1).take(l - 2).collect();
-        let s = self.allocator.borrow_mut().make_string(s);
+        let s = self.allocator.borrow_mut().allocate_string(s);
         self.emit_constant(s);
     }
 
