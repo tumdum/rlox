@@ -1,3 +1,4 @@
+mod allocator;
 mod chunk;
 mod compiler;
 mod debug;
@@ -18,12 +19,15 @@ struct Opt {
     script: Option<PathBuf>,
 }
 
-fn main() -> Result<(), vm::Error> {
+fn main() {
     let opt = Opt::from_args();
     let mut vm = VM::default();
 
-    match opt.script {
+    let result = match opt.script {
         None => vm.repl(),
         Some(script) => vm.run_file(&script),
+    };
+    if let Err(e) = result {
+        println!("Final result: {}", e);
     }
 }

@@ -193,7 +193,7 @@ impl Scanner {
 
     fn advance(&mut self) -> char {
         self.current += 1;
-        return self.source[self.current - 1];
+        self.source[self.current - 1]
     }
 
     fn matches(&mut self, expected: char) -> bool {
@@ -204,7 +204,7 @@ impl Scanner {
             return false;
         }
         self.current += 1;
-        return true;
+        true
     }
 
     fn make_token(&self, start: usize, token_type: TokenType) -> Token {
@@ -277,7 +277,6 @@ impl Scanner {
 
     fn number(&mut self) -> Result<Token, Error> {
         let current = self.current - 1;
-        dbg!(self.current, &self.source);
         while self.peek().is_digit(10) {
             self.advance();
         }

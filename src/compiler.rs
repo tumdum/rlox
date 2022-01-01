@@ -1,10 +1,13 @@
+use crate::allocator::Allocator;
 use crate::chunk::{Chunk, OpCode};
 use crate::scanner::Token;
 use crate::scanner::{self, Scanner, TokenType};
 use crate::value::Value;
 use maplit::hashmap;
 use once_cell::sync::Lazy;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use thiserror::Error;
 
 static RULES: Lazy<HashMap<TokenType, ParseRule>> = Lazy::new(|| {
@@ -29,7 +32,7 @@ static RULES: Lazy<HashMap<TokenType, ParseRule>> = Lazy::new(|| {
        TokenType::Less           => ParseRule{prefix: None,                    infix: Some(&Parser::binary), precedence: Precedence::Comparison},
        TokenType::LessEqual      => ParseRule{prefix: None,                    infix: Some(&Parser::binary), precedence: Precedence::Comparison},
        TokenType::Identifier     => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::String         => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
+       TokenType::String         => ParseRule{prefix: Some(&Parser::string),   infix: None,                  precedence: Precedence::None},
        TokenType::Number         => ParseRule{prefix: Some(&Parser::number),   infix: None,                  precedence: Precedence::None},
        TokenType::And            => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Class          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
@@ -89,7 +92,7 @@ impl Precedence {
     }
 }
 
-type ParseFn = &'static (dyn Fn(&mut Parser) -> () + Sync);
+type ParseFn = &'static (dyn Fn(&mut Parser) + Sync);
 
 #[derive(Clone)]
 struct ParseRule {
@@ -104,10 +107,10 @@ pub enum Error {
     ScannerError(#[from] crate::scanner::Error),
 }
 
-#[derive(Debug)]
 pub struct Parser {
     scanner: Scanner,
     compiling_chunk: Chunk,
+    allocator: Rc<RefCell<Allocator>>,
     current: Option<Token>,
     previous: Option<Token>,
     had_error: bool,
@@ -115,11 +118,12 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(source: &str) -> Self {
+    pub fn new(source: &str, allocator: Rc<RefCell<Allocator>>) -> Self {
         let scanner = scanner::Scanner::new(source);
         Self {
             scanner,
             compiling_chunk: Chunk::default(),
+            allocator,
             current: None,
             previous: None,
             had_error: false,
@@ -147,6 +151,14 @@ impl Parser {
     fn number(&mut self) {
         let value: f64 = self.previous.as_ref().unwrap().value.parse().unwrap();
         self.emit_constant(value.into());
+    }
+
+    fn string(&mut self) {
+        let s = &self.previous.as_ref().unwrap().value;
+        let l = s.len();
+        let s: String = s.chars().skip(1).take(l - 2).collect();
+        let s = self.allocator.borrow_mut().make_string(s);
+        self.emit_constant(s);
     }
 
     fn grouping(&mut self) {
