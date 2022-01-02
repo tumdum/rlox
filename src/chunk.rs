@@ -24,8 +24,13 @@ impl Chunk {
     }
 
     pub fn add_constant(&mut self, value: Value) -> Result<u8, TryFromIntError> {
-        self.constants.push(value);
-        (self.constants.len() - 1).try_into()
+        match self.constants.iter().position(|v| v == &value) {
+            Some(idx) => Ok(idx.try_into()?),
+            None => {
+                self.constants.push(value);
+                (self.constants.len() - 1).try_into()
+            }
+        }
     }
 }
 
@@ -36,16 +41,21 @@ pub enum OpCode {
     Nil = 1,
     True = 2,
     False = 3,
-    Equal = 4,
-    Greater = 5,
-    Less = 6,
-    Add = 7,
-    Subtract = 8,
-    Multiply = 9,
-    Divide = 10,
-    Not = 11,
-    Negate = 12,
-    Return = 13,
+    Pop = 4,
+    GetGlobal = 5,
+    DefineGlobal = 6,
+    SetGlobal = 7,
+    Equal = 8,
+    Greater = 9,
+    Less = 10,
+    Add = 11,
+    Subtract = 12,
+    Multiply = 13,
+    Divide = 14,
+    Not = 15,
+    Negate = 16,
+    Print = 17,
+    Return = 18,
 }
 
 #[derive(Debug, Error)]
@@ -61,16 +71,21 @@ impl TryFrom<u8> for OpCode {
             1 => Ok(OpCode::Nil),
             2 => Ok(OpCode::True),
             3 => Ok(OpCode::False),
-            4 => Ok(OpCode::Equal),
-            5 => Ok(OpCode::Greater),
-            6 => Ok(OpCode::Less),
-            7 => Ok(OpCode::Add),
-            8 => Ok(OpCode::Subtract),
-            9 => Ok(OpCode::Multiply),
-            10 => Ok(OpCode::Divide),
-            11 => Ok(OpCode::Not),
-            12 => Ok(OpCode::Negate),
-            13 => Ok(OpCode::Return),
+            4 => Ok(OpCode::Pop),
+            5 => Ok(OpCode::GetGlobal),
+            6 => Ok(OpCode::DefineGlobal),
+            7 => Ok(OpCode::SetGlobal),
+            8 => Ok(OpCode::Equal),
+            9 => Ok(OpCode::Greater),
+            10 => Ok(OpCode::Less),
+            11 => Ok(OpCode::Add),
+            12 => Ok(OpCode::Subtract),
+            13 => Ok(OpCode::Multiply),
+            14 => Ok(OpCode::Divide),
+            15 => Ok(OpCode::Not),
+            16 => Ok(OpCode::Negate),
+            17 => Ok(OpCode::Print),
+            18 => Ok(OpCode::Return),
             other => Err(InvalidOpCode(other)),
         }
     }

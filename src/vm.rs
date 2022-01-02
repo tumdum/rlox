@@ -4,7 +4,8 @@ use crate::compiler::Parser;
 use crate::value::{Obj, Value};
 use crate::{Chunk, OpCode};
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::hash_map::Entry::*;
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::rc::Rc;
@@ -40,31 +41,29 @@ pub enum Error {
     CompilationFailed,
     #[error("Pop from empty stack")]
     PopFromEmptyStack,
+    #[error("Undefined global variable '{0}'")]
+    UndefinedGlobalVariable(String),
 }
 
 pub struct VM {
     chunk: Chunk,
     pc: usize,
-    stack: VecDeque<Value>,
+    stack: Vec<Value>,
+    globals: HashMap<String, Value>,
     allocator: Rc<RefCell<Allocator>>,
+    output: Rc<RefCell<dyn std::io::Write>>,
 }
 
-impl Default for VM {
-    fn default() -> Self {
+impl VM {
+    pub fn new(output: Rc<RefCell<dyn std::io::Write>>) -> Self {
         Self {
             chunk: Default::default(),
             pc: 0,
             stack: Default::default(),
+            globals: HashMap::new(),
             allocator: Rc::new(RefCell::new(Allocator::default())),
+            output,
         }
-    }
-}
-
-impl VM {
-    pub fn new(chunk: Chunk) -> Self {
-        let mut ret = Self::default();
-        ret.set_chunk(chunk);
-        ret
     }
 
     pub fn set_chunk(&mut self, chunk: Chunk) {
@@ -89,29 +88,33 @@ impl VM {
     }
 
     fn trace(&self) {
-        println!("          {:?}", self.stack);
+        println!("  stack: {:?}", self.stack);
+        println!("globals: {:?}", self.globals);
         self.chunk.disassemble_instruction(self.pc);
     }
 
     fn push(&mut self, v: impl Into<Value>) {
         let v = v.into();
-        self.stack.push_back(v);
+        self.stack.push(v);
     }
 
     fn pop(&mut self) -> Result<Value, Error> {
-        self.stack.pop_back().ok_or(Error::PopFromEmptyStack)
+        self.stack.pop().ok_or(Error::PopFromEmptyStack)
     }
 
-    pub fn run(&mut self) -> Result<Value, Error> {
+    pub fn run(&mut self) -> Result<(), Error> {
         loop {
             #[cfg(debug_assertions)]
             self.trace();
 
             match self.read_opcode()? {
                 OpCode::Return => {
+                    // let value = self.pop()?;
+                    return Ok(());
+                }
+                OpCode::Print => {
                     let value = self.pop()?;
-                    println!("{:?}", value);
-                    return Ok(value);
+                    writeln!(self.output.borrow_mut(), "{}", value)?;
                 }
                 OpCode::Greater => {
                     let b = self.pop()?;
@@ -171,6 +174,39 @@ impl VM {
                 OpCode::Nil => self.push(Value::Nil),
                 OpCode::True => self.push(true),
                 OpCode::False => self.push(false),
+                OpCode::Pop => {
+                    self.pop()?;
+                }
+                OpCode::GetGlobal => {
+                    let name = self.read_constant().string().unwrap().to_owned(); // TODO
+                    match self.globals.entry(name) {
+                        Occupied(e) => {
+                            let value = e.get().clone();
+                            self.push(value);
+                        }
+                        Vacant(e) => {
+                            return Err(Error::UndefinedGlobalVariable(e.key().to_owned()))
+                        }
+                    }
+                }
+                OpCode::DefineGlobal => {
+                    let name = self.read_constant().string().unwrap().to_owned(); // TODO
+                    let value = self.stack.last().unwrap().clone();
+                    self.globals.insert(name, value);
+                    self.pop()?;
+                }
+                OpCode::SetGlobal => {
+                    let name = self.read_constant().string().unwrap().to_owned(); // TODO
+                    let value = self.stack.last().unwrap().clone();
+                    match self.globals.entry(name) {
+                        Occupied(mut e) => {
+                            e.insert(value);
+                        }
+                        Vacant(e) => {
+                            return Err(Error::UndefinedGlobalVariable(e.key().to_owned()))
+                        }
+                    }
+                }
                 OpCode::Equal => {
                     let b = self.pop()?;
                     let a = self.pop()?;
@@ -197,7 +233,7 @@ impl VM {
         Ok(())
     }
 
-    fn interpret(&mut self, source: &str) -> Result<Value, Error> {
+    fn interpret(&mut self, source: &str) -> Result<(), Error> {
         let parser = Parser::new(source, self.allocator.clone());
         let chunk = if let Some(chunk) = parser.compile() {
             chunk
@@ -218,64 +254,80 @@ mod tests {
 
     macro_rules! test_eval {
         ($input: literal, $expected: expr) => {{
-            let mut vm = VM::default();
-            let got = vm.interpret($input);
+            let output = Rc::new(RefCell::new(vec![]));
+            let mut vm = VM::new(output.clone());
+            let got = vm.interpret(&format!("{}", $input));
             assert_matches!(got, Ok(_));
-            let got = got.unwrap();
-            assert_eq!(got, $expected, "for expression: {}", stringify!($input));
-            assert!(vm.stack.is_empty());
+            let output = std::str::from_utf8(&output.borrow()).unwrap().to_owned();
+            let output = output.trim();
+            assert_eq!(
+                output,
+                format!("{}", $expected),
+                "for expression: {}",
+                stringify!($input)
+            );
         }};
     }
 
     #[test]
     fn literals() {
-        test_eval!("1", Value::Number(1f64));
-        test_eval!("1.1", Value::Number(1.1f64));
-        test_eval!("true", Value::Boolean(true));
-        test_eval!("false", Value::Boolean(false));
-        test_eval!("nil", Value::Nil);
+        test_eval!("print 1;", Value::Number(1f64));
+        test_eval!("print 1.1;", Value::Number(1.1f64));
+        test_eval!("print true;", Value::Boolean(true));
+        test_eval!("print false;", Value::Boolean(false));
+        test_eval!("print nil;", Value::Nil);
     }
 
     #[test]
     fn unary() {
-        test_eval!("-13.109", Value::Number(-13.109f64));
-        test_eval!("-0", Value::Number(-0f64));
-        test_eval!("!true", Value::Boolean(false));
-        test_eval!("!!true", Value::Boolean(true));
-        test_eval!("!false", Value::Boolean(true));
-        test_eval!("!!false", Value::Boolean(false));
-        test_eval!("!nil", Value::Boolean(true));
-        test_eval!("!!nil", Value::Boolean(false));
+        test_eval!("print -13.109;", Value::Number(-13.109f64));
+        test_eval!("print -0;", Value::Number(-0f64));
+        test_eval!("print !true;", Value::Boolean(false));
+        test_eval!("print !!true;", Value::Boolean(true));
+        test_eval!("print !false;", Value::Boolean(true));
+        test_eval!("print !!false;", Value::Boolean(false));
+        test_eval!("print !nil;", Value::Boolean(true));
+        test_eval!("print !!nil;", Value::Boolean(false));
     }
 
     #[test]
     fn arithmetic() {
-        test_eval!("1+2", Value::Number(3.0));
-        test_eval!("1-2", Value::Number(-1.0));
-        test_eval!("3*2", Value::Number(6.0));
-        test_eval!("9.3/3", Value::Number(3.1));
-        test_eval!("2*3+5", Value::Number(11.0));
-        test_eval!("-2*(3+5)", Value::Number(-16.0));
+        test_eval!("print 1+2;", Value::Number(3.0));
+        test_eval!("print 1-2;", Value::Number(-1.0));
+        test_eval!("print 3*2;", Value::Number(6.0));
+        test_eval!("print 9.3/3;", Value::Number(3.1));
+        test_eval!("print 2*3+5;", Value::Number(11.0));
+        test_eval!("print -2*(3+5);", Value::Number(-16.0));
     }
 
     #[test]
     fn binary() {
-        test_eval!("nil!=nil", Value::Boolean(false));
-        test_eval!("nil<nil", Value::Boolean(false));
-        test_eval!("nil==nil", Value::Boolean(true));
-        test_eval!("1!=1", Value::Boolean(false));
-        test_eval!("1==1", Value::Boolean(true));
-        test_eval!(r#""test"=="test""#, Value::Boolean(true));
-        test_eval!(r#""test"<"test""#, Value::Boolean(false));
-        test_eval!(r#""test"!="test""#, Value::Boolean(false));
-        test_eval!(r#""test"+"1"=="test1""#, Value::Boolean(true));
-        test_eval!("1+2==3", Value::Boolean(true));
-        test_eval!("true!=false", Value::Boolean(true));
-        test_eval!("true<false", Value::Boolean(false));
-        test_eval!("true==false", Value::Boolean(false));
-        test_eval!("2<3", Value::Boolean(true));
-        test_eval!("2<=3", Value::Boolean(true));
-        test_eval!("2>3", Value::Boolean(false));
-        test_eval!("2>=3", Value::Boolean(false));
+        test_eval!("print nil!=nil;", Value::Boolean(false));
+        test_eval!("print nil<nil;", Value::Boolean(false));
+        test_eval!("print nil==nil;", Value::Boolean(true));
+        test_eval!("print 1!=1;", Value::Boolean(false));
+        test_eval!("print 1==1;", Value::Boolean(true));
+        test_eval!(r#"print "test"=="test";"#, Value::Boolean(true));
+        test_eval!(r#"print "test"<"test";"#, Value::Boolean(false));
+        test_eval!(r#"print "test"!="test";"#, Value::Boolean(false));
+        test_eval!(r#"print "test"+"1"=="test1";"#, Value::Boolean(true));
+        test_eval!("print 1+2==3;", Value::Boolean(true));
+        test_eval!("print true!=false;", Value::Boolean(true));
+        test_eval!("print true<false;", Value::Boolean(false));
+        test_eval!("print true==false;", Value::Boolean(false));
+        test_eval!("print 2<3;", Value::Boolean(true));
+        test_eval!("print 2<=3;", Value::Boolean(true));
+        test_eval!("print 2>3;", Value::Boolean(false));
+        test_eval!("print 2>=3;", Value::Boolean(false));
+    }
+
+    #[test]
+    fn globals() {
+        test_eval!("var x = 1; var y = 2; print x + y;", Value::Number(3.0));
+        test_eval!("var x = \"abc\"; var y = \"ABC\"; print x + y;", "abcABC");
+        test_eval!(
+            r#"var breakfast = "beignets"; var beverage = "cafe au lait"; breakfast = "beignets with " + beverage; print breakfast;"#,
+            "beignets with cafe au lait"
+        );
     }
 }

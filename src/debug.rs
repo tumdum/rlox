@@ -3,6 +3,10 @@ use crate::chunk::{Chunk, OpCode};
 impl Chunk {
     pub fn disassemble(&self, name: &str) {
         println!("== {} ==", name);
+        println!("{} constants:", self.constants.len());
+        for (i, v) in self.constants.iter().enumerate() {
+            println!("{:3}: {:?}", i, v);
+        }
         let mut offset = 0;
         while offset < self.code.len() {
             offset = self.disassemble_instruction(offset);
@@ -24,17 +28,20 @@ impl Chunk {
             Ok(OpCode::Nil) => simple_instruction("OP_NIL", offset),
             Ok(OpCode::True) => simple_instruction("OP_TRUE", offset),
             Ok(OpCode::False) => simple_instruction("OP_FALSE", offset),
-
+            Ok(OpCode::Pop) => simple_instruction("OP_POP", offset),
+            Ok(OpCode::GetGlobal) => self.constant_instruction("OP_GET_GLOBAL", offset),
+            Ok(OpCode::DefineGlobal) => self.constant_instruction("OP_DEFINE_GLOBAL", offset),
+            Ok(OpCode::SetGlobal) => self.constant_instruction("OP_SET_GLOBAL", offset),
             Ok(OpCode::Equal) => simple_instruction("OP_EQUAL", offset),
             Ok(OpCode::Greater) => simple_instruction("OP_GREATER", offset),
             Ok(OpCode::Less) => simple_instruction("OP_LESS", offset),
-
             Ok(OpCode::Add) => simple_instruction("OP_ADD", offset),
             Ok(OpCode::Subtract) => simple_instruction("OP_SUBTRACT", offset),
             Ok(OpCode::Multiply) => simple_instruction("OP_MULTIPLY", offset),
             Ok(OpCode::Divide) => simple_instruction("OP_DIVIDE", offset),
             Ok(OpCode::Not) => simple_instruction("OP_NOT", offset),
             Ok(OpCode::Negate) => simple_instruction("OP_NEGATE", offset),
+            Ok(OpCode::Print) => simple_instruction("OP_PRINT", offset),
             Ok(OpCode::Return) => simple_instruction("OP_RETURN", offset),
             _other => {
                 println!("Unknown opcode {}", instruction);

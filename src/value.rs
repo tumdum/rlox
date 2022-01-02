@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use thiserror::Error;
 
@@ -11,6 +11,14 @@ pub enum Error {
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub enum Obj {
     String(String),
+}
+
+impl Display for Obj {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Self::String(s) => write!(f, "{}", s),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -46,6 +54,27 @@ impl Value {
     pub fn is_falsey(&self) -> bool {
         matches!(self, Value::Nil) || matches!(self, Value::Boolean(false))
     }
+
+    pub fn string(&self) -> Option<&str> {
+        if let Self::Obj(ptr) = self {
+            let Obj::String(s) = unsafe { &**ptr };
+            return Some(s);
+        }
+        None
+    }
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Value::Nil => write!(f, "nil"),
+            Value::Number(n) => write!(f, "{}", n),
+            Value::Boolean(b) => write!(f, "{}", b),
+            Value::Obj(ptr) => {
+                write!(f, "{}", unsafe { &**ptr })
+            }
+        }
+    }
 }
 
 impl Debug for Value {
@@ -55,7 +84,7 @@ impl Debug for Value {
             Value::Number(n) => write!(f, "Number({})", n),
             Value::Boolean(b) => write!(f, "Boolean({})", b),
             Value::Obj(ptr) => {
-                write!(f, "Obj({:p} => {:?})", ptr, unsafe { &**ptr })
+                write!(f, "Obj({:p} => {:?})", *ptr, unsafe { &**ptr })
             }
         }
     }
