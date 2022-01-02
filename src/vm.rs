@@ -177,6 +177,14 @@ impl VM {
                 OpCode::Pop => {
                     self.pop()?;
                 }
+                OpCode::GetLocal => {
+                    let slot = self.read_byte() as usize;
+                    self.push(self.stack[slot].clone());
+                }
+                OpCode::SetLocal => {
+                    let slot = self.read_byte() as usize;
+                    self.stack[slot] = self.stack.last().unwrap().clone();
+                }
                 OpCode::GetGlobal => {
                     let name = self.read_constant().string().unwrap().to_owned(); // TODO
                     match self.globals.entry(name) {
@@ -328,6 +336,50 @@ mod tests {
         test_eval!(
             r#"var breakfast = "beignets"; var beverage = "cafe au lait"; breakfast = "beignets with " + beverage; print breakfast;"#,
             "beignets with cafe au lait"
+        );
+    }
+
+    #[test]
+    fn locals() {
+        test_eval!("{var x = 1; var y = 2; print x + y;}", Value::Number(3.0));
+        test_eval!("{var x = 1; {var y = 2; print x + y;}}", Value::Number(3.0));
+        test_eval!(
+            "{var x = 1; {var y = 2; {print x + y;}}}",
+            Value::Number(3.0)
+        );
+        test_eval!(
+            r#"
+        {
+            var x = 1;
+            {
+                var x = 2;
+                {
+                    var x = 3;
+                    print x;
+                }
+                print x;
+            }
+            print x;
+        }
+        "#,
+            "3\n2\n1"
+        );
+        test_eval!(
+            r#"
+        {
+            var x = 1;
+            {
+                x = 2;
+                {
+                    x = 3;
+                    print x;
+                }
+                print x;
+            }
+            print x;
+        }
+        "#,
+            "3\n3\n3"
         );
     }
 }

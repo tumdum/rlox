@@ -107,14 +107,28 @@ pub enum Error {
     ScannerError(#[from] crate::scanner::Error),
 }
 
+
+#[derive(Debug, Default)]
+struct Local {
+    name: String,
+    depth: isize,
+}
+
+#[derive(Debug, Default)]
+struct Compiler {
+    locals: Vec<Local>,
+    scope_depth: isize,
+}
+
 pub struct Parser {
     scanner: Scanner,
     compiling_chunk: Chunk,
+    compiler: Compiler,
     allocator: Rc<RefCell<Allocator>>,
     current: Option<Token>,
     previous: Option<Token>,
-    had_error: bool,
-    panic_mode: bool,
+    had_error: RefCell<bool>,
+    panic_mode: RefCell<bool>,
 }
 
 impl Parser {
@@ -123,11 +137,12 @@ impl Parser {
         Self {
             scanner,
             compiling_chunk: Chunk::default(),
+            compiler: Compiler::default(),
             allocator,
             current: None,
             previous: None,
-            had_error: false,
-            panic_mode: false,
+            had_error: RefCell::new(false),
+            panic_mode: RefCell::new(false),
         }
     }
 
@@ -140,7 +155,7 @@ impl Parser {
 
         self.end_compiler();
 
-        if self.had_error {
+        if *self.had_error.borrow() {
             None
         } else {
             Some(self.compiling_chunk)
@@ -155,6 +170,14 @@ impl Parser {
         self.expression();
         self.consume(TokenType::Semicolon, "Expect ';' after value");
         self.emit_byte(OpCode::Pop as u8);
+    }
+
+    fn block(&mut self) {
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
+            self.declaration();
+        }
+
+        self.consume(TokenType::RightBrace, "Expect '}' after block");
     }
 
     fn var_declaration(&mut self) {
@@ -186,13 +209,13 @@ impl Parser {
             self.statement();
         }
 
-        if self.panic_mode {
+        if *self.panic_mode.borrow() {
             self.synchronize();
         }
     }
 
     fn synchronize(&mut self) {
-        self.panic_mode = false;
+        *self.panic_mode.borrow_mut() = false;
         use TokenType::*;
 
         while self.current.as_ref().unwrap().type_ != Eof {
@@ -212,6 +235,10 @@ impl Parser {
     fn statement(&mut self) {
         if self.match_token(TokenType::Print) {
             self.print_statement();
+        } else if self.match_token(TokenType::LeftBrace) {
+            self.begin_scope();
+            self.block();
+            self.end_scope();
         } else {
             self.expression_statement();
         }
@@ -235,12 +262,24 @@ impl Parser {
     }
 
     fn named_variable(&mut self, name: &Token, can_assign: bool) {
-        let arg = self.identifier_constant(name);
+        let get_op;
+        let set_op;
+
+        let mut arg = self.resolve_local(name);
+        if arg != -1 {
+            get_op = OpCode::GetLocal;
+            set_op = OpCode::SetLocal;
+        } else {
+            get_op = OpCode::GetGlobal;
+            set_op = OpCode::SetGlobal;
+            arg = self.identifier_constant(name) as isize;
+        }
+
         if can_assign && self.match_token(TokenType::Equal) {
             self.expression();
-            self.emit_bytes(OpCode::SetGlobal as u8, arg);
+            self.emit_bytes(set_op as u8, arg as u8);
         } else {
-            self.emit_bytes(OpCode::GetGlobal as u8, arg);
+            self.emit_bytes(get_op as u8, arg as u8);
         }
     }
 
@@ -326,6 +365,11 @@ impl Parser {
 
     fn parse_variable(&mut self, msg: &str) -> u8 {
         self.consume(TokenType::Identifier, msg);
+
+        self.declare_variable();
+        if self.compiler.scope_depth > 0 {
+            return 0;
+        }
         self.identifier_constant(self.previous.clone().as_ref().unwrap())
     }
 
@@ -337,8 +381,68 @@ impl Parser {
         self.make_constant(name).unwrap()
     }
 
+    fn declare_variable(&mut self) {
+        if self.compiler.scope_depth == 0 {
+            return;
+        }
+
+        let token = self.previous.as_ref().unwrap().clone();
+
+        for Local{name, depth} in self.compiler.locals.iter().rev() {
+            if *depth != -1 && *depth < self.compiler.scope_depth {
+                break;
+            }
+
+            if &token.value == name {
+                self.error(
+                    self.scanner.line(),
+                    "Already a variable with this name in this scope".into(),
+                );
+            }
+        }
+
+        self.add_local(token);
+    }
+
+    fn add_local(&mut self, name: Token) {
+        if self.compiler.locals.len() == u8::max_value() as usize {
+            self.error(
+                self.scanner.line(),
+                "Too many local variables in scope".into(),
+            );
+            return;
+        }
+        println!("Adding local {:?} @ {}", name, self.compiler.scope_depth);
+        self.compiler.locals.push(Local{name: name.value, depth: -1});
+    }
+
+    fn resolve_local(&mut self, name: &Token) -> isize {
+        println!("Resolving {:?} in {:?}", name, self.compiler.locals);
+        for i in (0..self.compiler.locals.len()).rev() {
+            if name.value == self.compiler.locals[i].name {
+                if self.compiler.locals[i].depth == -1 {
+                    self.error(
+                        self.scanner.line(),
+                        "Can't read local variable in its own initializer".into(),
+                    );
+                }
+
+                return i as isize;
+            }
+        }
+        -1
+    }
+
     fn define_variable(&mut self, global: u8) {
+        if self.compiler.scope_depth > 0 {
+            self.mark_initialized();
+            return;
+        }
         self.emit_bytes(OpCode::DefineGlobal as u8, global)
+    }
+
+    fn mark_initialized(&mut self) {
+        self.compiler.locals.last_mut().unwrap().depth = self.compiler.scope_depth;
     }
 
     fn get_rule(&self, operator_type: TokenType) -> ParseRule {
@@ -425,9 +529,24 @@ impl Parser {
 
     fn end_compiler(&mut self) {
         self.emit_return();
-        if !self.had_error {
+        if !*self.had_error.borrow() {
             #[cfg(debug_assertions)]
             self.current_chunk().disassemble("code");
+        }
+    }
+
+    fn begin_scope(&mut self) {
+        self.compiler.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.compiler.scope_depth -= 1;
+
+        while !self.compiler.locals.is_empty()
+            && self.compiler.locals.last().unwrap().depth > self.compiler.scope_depth
+        {
+            self.emit_byte(OpCode::Pop as u8);
+            self.compiler.locals.pop();
         }
     }
 
@@ -435,20 +554,20 @@ impl Parser {
         self.emit_byte(OpCode::Return as u8);
     }
 
-    fn error_from_scanner(&mut self, e: scanner::Error) {
+    fn error_from_scanner(&self, e: scanner::Error) {
         self.error_at(e.line, e.into());
     }
 
-    fn error(&mut self, line: usize, e: Box<dyn std::error::Error>) {
+    fn error(&self, line: usize, e: Box<dyn std::error::Error>) {
         self.error_at(line, e)
     }
 
-    fn error_at(&mut self, line: usize, e: Box<dyn std::error::Error>) {
-        if self.panic_mode {
+    fn error_at(&self, line: usize, e: Box<dyn std::error::Error>) {
+        if *self.panic_mode.borrow() {
             return;
         }
-        self.panic_mode = true;
+        *self.panic_mode.borrow_mut() = true;
         eprintln!("[line {}]: Error: {}", line, e);
-        self.had_error = true;
+        *self.had_error.borrow_mut() = true;
     }
 }

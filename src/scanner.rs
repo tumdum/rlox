@@ -31,7 +31,7 @@ pub struct Scanner {
     line: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Token {
     pub type_: TokenType,
     pub line: usize,
