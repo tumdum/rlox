@@ -57,7 +57,10 @@ pub enum OpCode {
     Not = 17,
     Negate = 18,
     Print = 19,
-    Return = 20,
+    Jump = 20,
+    JumpIfFalse = 21,
+    Loop = 22,
+    Return = 23,
 }
 
 #[derive(Debug, Error)]
@@ -89,7 +92,10 @@ impl TryFrom<u8> for OpCode {
             17 => Ok(OpCode::Not),
             18 => Ok(OpCode::Negate),
             19 => Ok(OpCode::Print),
-            20 => Ok(OpCode::Return),
+            20 => Ok(OpCode::Jump),
+            21 => Ok(OpCode::JumpIfFalse),
+            22 => Ok(OpCode::Loop),
+            23 => Ok(OpCode::Return),
             other => Err(InvalidOpCode(other)),
         }
     }

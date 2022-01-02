@@ -44,6 +44,9 @@ impl Chunk {
             Ok(OpCode::Not) => simple_instruction("OP_NOT", offset),
             Ok(OpCode::Negate) => simple_instruction("OP_NEGATE", offset),
             Ok(OpCode::Print) => simple_instruction("OP_PRINT", offset),
+            Ok(OpCode::Jump) => self.jump_instruction("OP_JUMP", 1, offset),
+            Ok(OpCode::JumpIfFalse) => self.jump_instruction("OP_JUMP_IF_FALSE", 1, offset),
+            Ok(OpCode::Loop) => self.jump_instruction("OP_JUMP", -1, offset),
             Ok(OpCode::Return) => simple_instruction("OP_RETURN", offset),
             _other => {
                 println!("Unknown opcode {}", instruction);
@@ -65,6 +68,13 @@ impl Chunk {
         let slot = self.code[offset + 1];
         println!("{:>16} {:4}", name, slot);
         offset + 2
+    }
+
+    fn jump_instruction(&self, name: &str, sign: isize, offset: usize) -> usize {
+        let jump = ((self.code[offset + 1] as u16) << 8 | self.code[offset + 2] as u16) as isize;
+        let off = offset as isize;
+        println!("{:>16} {:4} -> {}", name, offset, off + 3 + sign * jump);
+        offset + 3
     }
 }
 

@@ -87,6 +87,12 @@ impl VM {
         self.chunk.constants[constant_index].clone()
     }
 
+    fn read_u16(&mut self) -> u16 {
+        let ret = ((self.chunk.code[self.pc] as u16) << 8) | (self.chunk.code[self.pc + 1]) as u16;
+        self.pc += 2;
+        ret
+    }
+
     fn trace(&self) {
         println!("  stack: {:?}", self.stack);
         println!("globals: {:?}", self.globals);
@@ -108,8 +114,21 @@ impl VM {
             self.trace();
 
             match self.read_opcode()? {
+                OpCode::Jump => {
+                    let offset = self.read_u16();
+                    self.pc += offset as usize;
+                }
+                OpCode::JumpIfFalse => {
+                    let offset = self.read_u16();
+                    if self.stack.last().unwrap().is_falsey() {
+                        self.pc += offset as usize;
+                    }
+                }
+                OpCode::Loop => {
+                    let offset = self.read_u16();
+                    self.pc -= offset as usize;
+                }
                 OpCode::Return => {
-                    // let value = self.pop()?;
                     return Ok(());
                 }
                 OpCode::Print => {
@@ -261,7 +280,7 @@ mod tests {
     use assert_matches::assert_matches;
 
     macro_rules! test_eval {
-        ($input: literal, $expected: expr) => {{
+        ($input: expr, $expected: expr) => {{
             let output = Rc::new(RefCell::new(vec![]));
             let mut vm = VM::new(output.clone());
             let got = vm.interpret(&format!("{}", $input));
@@ -349,6 +368,7 @@ mod tests {
         );
         test_eval!(
             r#"
+        var x = 0;
         {
             var x = 1;
             {
@@ -361,8 +381,9 @@ mod tests {
             }
             print x;
         }
+        print x;
         "#,
-            "3\n2\n1"
+            "3\n2\n1\n0"
         );
         test_eval!(
             r#"
@@ -381,5 +402,60 @@ mod tests {
         "#,
             "3\n3\n3"
         );
+    }
+
+    #[test]
+    fn and_or() {
+        test_eval!("print 1>2 and nil;", "false");
+        test_eval!("print nil and 1>2;", "nil");
+        test_eval!("print 3>2 and 2>1 and 1>0;", "true");
+        test_eval!("print 3>2 and 2>1 and 1>0 and false;", "false");
+
+        test_eval!("print 1>2 or nil;", "nil");
+        test_eval!("print nil or 1>2;", "false");
+        test_eval!("print 3>2 or 2>1 or 1>0;", "true");
+        test_eval!("print 3>2 or 2>1 or 1>0 or false;", "true");
+    }
+
+    #[test]
+    fn r#while() {
+        let fib = r#"
+var target = 14;
+var a = 0;
+var b = 1;
+var i = 0;
+
+while (i < target) {
+    i = i + 1;
+    var tmp = b;
+    b = a + b;
+    a = tmp;
+}
+print a;
+        "#;
+        test_eval!(fib, "377");
+    }
+
+    #[test]
+    fn r#for() {
+        let fib = r#"
+print 0;
+print 1;
+var prev = 0;
+var current = 1;
+for (var a = 1; a < 14; a = a + 1) {
+    var tmp = prev;
+    prev = current;
+    current = current + tmp;
+    print current;
+}
+        "#;
+        test_eval!(
+            fib,
+            "0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n55\n89\n144\n233\n377"
+        );
+        test_eval!("for(;false;) { print 1; }", "");
+        test_eval!("var x = 1; for(;x < 2;x = x + 1) { print x; }", "1");
+        test_eval!("var x = 1; for(;x < 2;) { print x; x = x + 1; }", "1");
     }
 }
