@@ -9,11 +9,17 @@ pub enum Error {
     // todo in future
 }
 
-#[derive(Clone, Default, Debug, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Default, PartialEq, PartialOrd, Hash)]
 pub struct Function {
     pub arity: usize,
     pub chunk: Chunk,
     pub name: String,
+}
+
+impl Debug for Function {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "<fn {}@{}>", self.name, self.arity)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]

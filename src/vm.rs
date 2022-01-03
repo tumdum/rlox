@@ -11,6 +11,8 @@ use std::path::Path;
 use std::rc::Rc;
 use thiserror::Error;
 
+const MAX_CALL_STACK_DEPTH : usize = 1000;
+
 macro_rules! binary_op {
     ($target: expr, $op: tt) => {{
         let b = match $target.pop()? {
@@ -43,12 +45,18 @@ pub enum Error {
     PopFromEmptyStack,
     #[error("Undefined global variable '{0}'")]
     UndefinedGlobalVariable(String),
+    #[error("Tried to call non callable value: {0}")]
+    CallToNonCallableValue(Value),
+    #[error("Tried to call with invalid number of arguments. Expected {expected}, passed {passed}")]
+    InvalidNumberOfArguments{expected: usize, passed: usize},
+    #[error("Maximum call stack depth reached {MAX_CALL_STACK_DEPTH}")]
+    MaxCallStackDepthReached,
 }
 
 struct CallFrame {
     function: Value,
     pc: usize,
-    slots_offest: usize,
+    slots_offset: usize,
 }
 
 impl CallFrame {
@@ -134,6 +142,37 @@ impl VM {
         self.stack.pop().ok_or(Error::PopFromEmptyStack)
     }
 
+    fn peek(&self, offset: usize) -> Result<Value, Error> {
+        self.stack.get(self.stack.len()-1-offset).cloned().ok_or(Error::PopFromEmptyStack)
+    }
+
+    fn call_value(&mut self, callee: Value, arg_count: u8) -> Result<(), Error> {
+        match callee.function() {
+            Some(fun) => {
+                if arg_count as usize != fun.arity {
+                    return Err(Error::InvalidNumberOfArguments{expected: fun.arity, passed: arg_count as usize})
+                }
+                self.call(callee, arg_count)
+            },
+            None => {
+                Err(Error::CallToNonCallableValue(callee))
+            }
+        }
+    }
+
+    fn call(&mut self, function: Value, arg_count: u8) -> Result<(), Error> {
+        if self.frames.len() > MAX_CALL_STACK_DEPTH {
+            return Err(Error::MaxCallStackDepthReached)
+        }
+        self.frames.push(CallFrame {
+            function,
+            pc: 0,
+            slots_offset: self.stack.len() - arg_count as usize,
+        });
+
+        Ok(())
+    }
+
     pub fn run(&mut self) -> Result<(), Error> {
         loop {
             #[cfg(debug_assertions)]
@@ -154,8 +193,19 @@ impl VM {
                     let offset = self.read_u16();
                     self.current_frame_mut().pc -= offset as usize;
                 }
+                OpCode::Call => {
+                    let arg_count = self.read_byte();
+                    self.call_value(self.peek(arg_count as usize)?, arg_count)?;
+                },
                 OpCode::Return => {
-                    return Ok(());
+                    let result = self.pop()?;
+                    self.frames.pop();
+                    if self.frames.is_empty() {
+                        return Ok(())
+                    }
+                    let new_top = self.current_frame().slots_offset;
+                    self.stack.drain(new_top..);
+                    self.push(result);
                 }
                 OpCode::Print => {
                     let value = self.pop()?;
@@ -231,12 +281,12 @@ impl VM {
                 }
                 OpCode::GetLocal => {
                     let slot = self.read_byte() as usize;
-                    let slot_offset = self.current_frame().slots_offest;
+                    let slot_offset = self.current_frame().slots_offset;
                     self.push(self.stack[slot_offset + slot].clone());
                 }
                 OpCode::SetLocal => {
                     let slot = self.read_byte() as usize;
-                    let slot_offset = self.current_frame().slots_offest;
+                    let slot_offset = self.current_frame().slots_offset;
                     self.stack[slot_offset + slot] = self.stack.last().unwrap().clone();
                 }
                 OpCode::GetGlobal => {
@@ -307,7 +357,7 @@ impl VM {
         self.frames.push(CallFrame {
             function,
             pc: 0,
-            slots_offest: self.stack.len() - 1,
+            slots_offset: self.stack.len() - 1,
         });
 
         self.run()
@@ -502,5 +552,9 @@ for (var a = 1; a < 14; a = a + 1) {
     #[test]
     fn functions() {
         test_eval!("fun areWeThereYet() { print 1; } print areWeThereYet;", "<fn areWeThereYet>");
+        test_eval!("fun x(a,b,c) { print a + b + c; } x(1,100,10000);", "10101");
+        test_eval!(r#"var a = 999.3; fun x(a) { print a; } x("test"); print a;"#, "test\n999.3");
+        test_eval!(r#"var a = 999.3; fun x(a,b,c) { print a + b + c; } x("1","100","10000"); print a;"#, "110010000\n999.3");
+        test_eval!(r#"fun x(a) { print a; } x("test"); x("foo");"#, "test\nfoo");
     }
 }

@@ -47,6 +47,7 @@ impl Chunk {
             Ok(OpCode::Jump) => self.jump_instruction("OP_JUMP", 1, offset),
             Ok(OpCode::JumpIfFalse) => self.jump_instruction("OP_JUMP_IF_FALSE", 1, offset),
             Ok(OpCode::Loop) => self.jump_instruction("OP_JUMP", -1, offset),
+            Ok(OpCode::Call) => self.byte_instruction("OP_CALL", offset),
             Ok(OpCode::Return) => simple_instruction("OP_RETURN", offset),
             _other => {
                 println!("Unknown opcode {}", instruction);

@@ -12,7 +12,7 @@ use thiserror::Error;
 
 static RULES: Lazy<HashMap<TokenType, ParseRule>> = Lazy::new(|| {
     hashmap! {
-       TokenType::LeftParen      => ParseRule{prefix: Some(&Parser::grouping), infix: None,                  precedence: Precedence::None},
+       TokenType::LeftParen      => ParseRule{prefix: Some(&Parser::grouping), infix: Some(&Parser::call),   precedence: Precedence::Call},
        TokenType::RightParen     => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::LeftBrace      => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::RightBrace     => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
@@ -484,6 +484,11 @@ impl Parser {
         }
     }
 
+    fn call(&mut self, _can_assign: bool) {
+        let arg_count = self.argument_list();
+        self.emit_bytes(OpCode::Call as u8, arg_count);
+    }
+
     fn literal(&mut self, _can_assign: bool) {
         let operator_type = self.previous.as_ref().unwrap().type_;
         match operator_type {
@@ -604,6 +609,26 @@ impl Parser {
             return;
         }
         self.emit_bytes(OpCode::DefineGlobal as u8, global)
+    }
+
+    fn argument_list(&mut self) -> u8 {
+        let mut arg_count : usize = 0;
+
+        if !self.check(TokenType::RightParen) {
+            loop {
+                self.expression();
+                if arg_count == 255 {
+                    self.error(self.scanner.line(), "Can't have more than 255 arguments".into());
+                }
+                arg_count += 1;
+                if !self.match_token(TokenType::Comma) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(TokenType::RightParen, "Expect ')' after arguments");
+        arg_count as u8
     }
 
     fn and(&mut self, _can_assign: bool) {
@@ -781,6 +806,7 @@ impl Parser {
     }
 
     fn emit_return(&mut self) {
+        self.emit_byte(OpCode::Nil as u8);
         self.emit_byte(OpCode::Return as u8);
     }
 
