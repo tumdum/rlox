@@ -1,7 +1,7 @@
 use crate::allocator::Allocator;
 use crate::chunk::InvalidOpCode;
 use crate::compiler::Parser;
-use crate::value::{Obj, Value};
+use crate::value::{Function, Obj, Value};
 use crate::{Chunk, OpCode};
 use std::cell::RefCell;
 use std::collections::hash_map::Entry::*;
@@ -45,10 +45,24 @@ pub enum Error {
     UndefinedGlobalVariable(String),
 }
 
-pub struct VM {
-    chunk: Chunk,
+struct CallFrame {
+    function: Value,
     pc: usize,
+    slots_offest: usize,
+}
+
+impl CallFrame {
+    fn function_mut(&mut self) -> &mut Function {
+        self.function.function_mut().unwrap()
+    }
+    fn function(&self) -> &Function {
+        self.function.function().unwrap()
+    }
+}
+
+pub struct VM {
     stack: Vec<Value>,
+    frames: Vec<CallFrame>,
     globals: HashMap<String, Value>,
     allocator: Rc<RefCell<Allocator>>,
     output: Rc<RefCell<dyn std::io::Write>>,
@@ -57,24 +71,27 @@ pub struct VM {
 impl VM {
     pub fn new(output: Rc<RefCell<dyn std::io::Write>>) -> Self {
         Self {
-            chunk: Default::default(),
-            pc: 0,
             stack: Default::default(),
+            frames: Default::default(),
             globals: HashMap::new(),
             allocator: Rc::new(RefCell::new(Allocator::default())),
             output,
         }
     }
 
-    pub fn set_chunk(&mut self, chunk: Chunk) {
-        self.chunk = chunk;
-        self.pc = 0;
-        self.stack.clear();
+    fn current_frame(&self) -> &CallFrame {
+        self.frames.last().unwrap()
+    }
+
+    fn current_frame_mut(&mut self) -> &mut CallFrame {
+        self.frames.last_mut().unwrap()
     }
 
     fn read_byte(&mut self) -> u8 {
-        let ret = self.chunk.code[self.pc];
-        self.pc += 1;
+        let ret = self.current_frame().function().chunk.code[self.current_frame().pc];
+        // let ret = self.chunk.code[self.pc];
+        // self.pc += 1;
+        self.current_frame_mut().pc += 1;
         ret
     }
 
@@ -84,19 +101,28 @@ impl VM {
 
     fn read_constant(&mut self) -> Value {
         let constant_index = self.read_byte() as usize;
-        self.chunk.constants[constant_index].clone()
+        // self.chunk.constants[constant_index].clone()
+        self.current_frame().function().chunk.constants[constant_index].clone()
     }
 
     fn read_u16(&mut self) -> u16 {
-        let ret = ((self.chunk.code[self.pc] as u16) << 8) | (self.chunk.code[self.pc + 1]) as u16;
-        self.pc += 2;
+        let pc = self.current_frame().pc;
+        let chunk: &Chunk = &self.current_frame().function().chunk;
+        // let ret = ((self.chunk.code[self.pc] as u16) << 8) | (self.chunk.code[self.pc + 1]) as u16;
+        let ret = ((chunk.code[pc] as u16) << 8) | (chunk.code[pc + 1]) as u16;
+        // self.pc += 2;
+        self.current_frame_mut().pc += 2;
         ret
     }
 
     fn trace(&self) {
         println!("  stack: {:?}", self.stack);
         println!("globals: {:?}", self.globals);
-        self.chunk.disassemble_instruction(self.pc);
+        // self.chunk.disassemble_instruction(self.pc);
+        self.current_frame()
+            .function()
+            .chunk
+            .disassemble_instruction(self.current_frame().pc);
     }
 
     fn push(&mut self, v: impl Into<Value>) {
@@ -116,17 +142,17 @@ impl VM {
             match self.read_opcode()? {
                 OpCode::Jump => {
                     let offset = self.read_u16();
-                    self.pc += offset as usize;
+                    self.current_frame_mut().pc += offset as usize;
                 }
                 OpCode::JumpIfFalse => {
                     let offset = self.read_u16();
                     if self.stack.last().unwrap().is_falsey() {
-                        self.pc += offset as usize;
+                        self.current_frame_mut().pc += offset as usize;
                     }
                 }
                 OpCode::Loop => {
                     let offset = self.read_u16();
-                    self.pc -= offset as usize;
+                    self.current_frame_mut().pc -= offset as usize;
                 }
                 OpCode::Return => {
                     return Ok(());
@@ -159,6 +185,13 @@ impl VM {
                                 (self::Obj::String(l), self::Obj::String(r)) => {
                                     let tmp = format!("{}{}", l, r);
                                     self.allocator.borrow_mut().allocate_string(tmp)
+                                }
+                                (_, _) => {
+                                    return Err(Error::InvalidOperands(
+                                        a.clone(),
+                                        "+".to_owned(),
+                                        b.clone(),
+                                    ))
                                 }
                             }
                         },
@@ -198,11 +231,13 @@ impl VM {
                 }
                 OpCode::GetLocal => {
                     let slot = self.read_byte() as usize;
-                    self.push(self.stack[slot].clone());
+                    let slot_offset = self.current_frame().slots_offest;
+                    self.push(self.stack[slot_offset + slot].clone());
                 }
                 OpCode::SetLocal => {
                     let slot = self.read_byte() as usize;
-                    self.stack[slot] = self.stack.last().unwrap().clone();
+                    let slot_offset = self.current_frame().slots_offest;
+                    self.stack[slot_offset + slot] = self.stack.last().unwrap().clone();
                 }
                 OpCode::GetGlobal => {
                     let name = self.read_constant().string().unwrap().to_owned(); // TODO
@@ -262,13 +297,18 @@ impl VM {
 
     fn interpret(&mut self, source: &str) -> Result<(), Error> {
         let parser = Parser::new(source, self.allocator.clone());
-        let chunk = if let Some(chunk) = parser.compile() {
-            chunk
+        let function = if let Some(function) = parser.compile() {
+            function
         } else {
             return Err(Error::CompilationFailed);
         };
 
-        self.set_chunk(chunk);
+        self.push(function.clone());
+        self.frames.push(CallFrame {
+            function,
+            pc: 0,
+            slots_offest: self.stack.len() - 1,
+        });
 
         self.run()
     }
@@ -457,5 +497,10 @@ for (var a = 1; a < 14; a = a + 1) {
         test_eval!("for(;false;) { print 1; }", "");
         test_eval!("var x = 1; for(;x < 2;x = x + 1) { print x; }", "1");
         test_eval!("var x = 1; for(;x < 2;) { print x; x = x + 1; }", "1");
+    }
+
+    #[test]
+    fn functions() {
+        test_eval!("fun areWeThereYet() { print 1; } print areWeThereYet;", "<fn areWeThereYet>");
     }
 }

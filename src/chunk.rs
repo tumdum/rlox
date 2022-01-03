@@ -2,7 +2,7 @@ use crate::value::Value;
 use std::num::TryFromIntError;
 use thiserror::Error;
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug, PartialEq, PartialOrd, Hash)]
 pub struct Chunk {
     pub code: Vec<u8>,
     pub constants: Vec<Value>,

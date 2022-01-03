@@ -1,3 +1,4 @@
+use crate::chunk::Chunk;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
@@ -8,15 +9,24 @@ pub enum Error {
     // todo in future
 }
 
+#[derive(Clone, Default, Debug, PartialEq, PartialOrd, Hash)]
+pub struct Function {
+    pub arity: usize,
+    pub chunk: Chunk,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub enum Obj {
     String(String),
+    Function(Function),
 }
 
 impl Display for Obj {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             Self::String(s) => write!(f, "{}", s),
+            Self::Function(Function { name, .. }) => write!(f, "<fn {}>", name),
         }
     }
 }
@@ -26,7 +36,7 @@ pub enum Value {
     Nil,
     Number(f64),
     Boolean(bool),
-    Obj(*const Obj),
+    Obj(*mut Obj),
 }
 
 impl Hash for Value {
@@ -41,10 +51,7 @@ impl Hash for Value {
             Boolean(b) => h.write_u8(*b as u8),
             Obj(ptr) => {
                 let obj: &self::Obj = unsafe { &**ptr };
-                use self::Obj::*;
-                match obj {
-                    String(s) => s.hash(h),
-                }
+                obj.hash(h);
             }
         }
     }
@@ -57,10 +64,51 @@ impl Value {
 
     pub fn string(&self) -> Option<&str> {
         if let Self::Obj(ptr) = self {
-            let Obj::String(s) = unsafe { &**ptr };
-            return Some(s);
+            if let Obj::String(s) = unsafe { &**ptr } {
+                return Some(s);
+            }
         }
         None
+    }
+
+    pub fn function_mut(&mut self) -> Option<&mut Function> {
+        if let Value::Obj(ptr) = self {
+            let obj: &mut Obj = unsafe { &mut **ptr };
+            if let Obj::Function(ref mut f) = obj {
+                return Some(f);
+            }
+        }
+        None
+    }
+
+    pub fn function(&self) -> Option<&Function> {
+        if let Value::Obj(ptr) = self {
+            let obj: &Obj = unsafe { &**ptr };
+            if let Obj::Function(f) = obj {
+                return Some(f);
+            }
+        }
+        None
+    }
+
+    pub fn chunk_mut(&mut self) -> &mut Chunk {
+        if let Value::Obj(ptr) = self {
+            let obj: &mut Obj = unsafe { &mut **ptr };
+            if let Obj::Function(f) = obj {
+                return &mut f.chunk;
+            }
+        }
+        todo!()
+    }
+
+    pub fn chunk(&self) -> &Chunk {
+        if let Value::Obj(ptr) = self {
+            let obj: &Obj = unsafe { &**ptr };
+            if let Obj::Function(f) = obj {
+                return &f.chunk;
+            }
+        }
+        todo!()
     }
 }
 

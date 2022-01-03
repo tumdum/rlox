@@ -1,11 +1,11 @@
-use crate::value::{Obj, Value};
+use crate::value::{Function, Obj, Value};
 use std::collections::HashSet;
 use std::mem::transmute;
 
 #[derive(Debug, Default)]
 pub struct Allocator {
     all_objects: Vec<*const Obj>,
-    strings: HashSet<Value>,
+    values: HashSet<Value>,
 }
 
 impl Drop for Allocator {
@@ -21,11 +21,25 @@ impl Allocator {
         let obj = Box::into_raw(b);
         debug_assert!(!self.all_objects.contains(&(obj as *const Obj)));
         let value = Value::Obj(obj);
-        if self.strings.contains(&value) {
-            self.strings.get(&value).unwrap().clone()
+        if self.values.contains(&value) {
+            self.values.get(&value).unwrap().clone()
         } else {
             self.all_objects.push(obj);
-            self.strings.insert(value.clone());
+            self.values.insert(value.clone());
+            value
+        }
+    }
+
+    pub fn allocate_function(&mut self, f: Function) -> Value {
+        let b = Box::new(Obj::Function(f));
+        let obj = Box::into_raw(b);
+        debug_assert!(!self.all_objects.contains(&(obj as *const Obj)));
+        let value = Value::Obj(obj);
+        if self.values.contains(&value) {
+            self.values.get(&value).unwrap().clone()
+        } else {
+            self.all_objects.push(obj);
+            self.values.insert(value.clone());
             value
         }
     }
