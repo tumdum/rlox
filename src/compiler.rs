@@ -107,7 +107,7 @@ pub enum Error {
     ScannerError(#[from] crate::scanner::Error),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 enum FunctionType {
     Function,
     Script,
@@ -155,9 +155,6 @@ pub struct Parser {
 impl Parser {
     pub fn new(source: &str, allocator: Rc<RefCell<Allocator>>) -> Self {
         let scanner = scanner::Scanner::new(source);
-        let function = allocator
-            .borrow_mut()
-            .allocate_function(Function::default());
         let mut compiler = Compiler::new(allocator.clone());
         compiler.locals.push(Local {
             name: "".to_owned(),
@@ -165,8 +162,6 @@ impl Parser {
         });
         Self {
             scanner,
-            //function,
-            //function_type: FunctionType::Script,
             compilers: vec![compiler],
             allocator,
             current: None,
@@ -230,7 +225,6 @@ impl Parser {
             let increment_start = self.current_chunk().code.len();
             self.expression();
             self.emit_byte(OpCode::Pop as u8);
-            dbg!(&self.previous, &self.current);
             self.consume(TokenType::RightParen, "Expect ')' after for clauses");
 
             self.emit_loop(loop_start);
@@ -289,7 +283,7 @@ impl Parser {
         let compilers = self.compilers.len();
         self.compilers.push(Compiler::new(self.allocator.clone()));
         self.compilers.last_mut().unwrap().function.function_mut().unwrap().name = self.previous.as_ref().unwrap().value.clone();
-
+        self.compilers.last_mut().unwrap().function_type = function_type;
 
         self.begin_scope();
         self.consume(TokenType::LeftParen, "Expect '(' after function name");
@@ -338,6 +332,20 @@ impl Parser {
         self.expression();
         self.consume(TokenType::Semicolon, "Expect ';' after value");
         self.emit_byte(OpCode::Print as u8);
+    }
+
+    fn return_statement(&mut self) {
+        if self.compilers.last().unwrap().function_type  == FunctionType::Script {
+            self.error(self.scanner.line(), "Can't return from top level".into());
+        }
+
+        if self.match_token(TokenType::Semicolon) {
+            self.emit_return();
+        } else {
+            self.expression();
+            self.consume(TokenType::Semicolon, "Expect ';' after return value");
+            self.emit_byte(OpCode::Return as u8);
+        }
     }
 
     fn while_statement(&mut self) {
@@ -394,6 +402,8 @@ impl Parser {
             self.for_statement();
         } else if self.match_token(TokenType::If) {
             self.if_statement();
+        } else if self.match_token(TokenType::Return) {
+            self.return_statement();
         } else if self.match_token(TokenType::While) {
             self.while_statement();
         } else if self.match_token(TokenType::LeftBrace) {
@@ -579,7 +589,7 @@ impl Parser {
             );
             return;
         }
-        println!("Adding local {:?} @ {}", name, self.compilers.last().unwrap().scope_depth);
+        // println!("Adding local {:?} @ {}", name, self.compilers.last().unwrap().scope_depth);
         self.compilers.last_mut().unwrap().locals.push(Local {
             name: name.value,
             depth: -1,

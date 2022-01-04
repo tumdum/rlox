@@ -2,6 +2,7 @@ use crate::chunk::Chunk;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -14,6 +15,24 @@ pub struct Function {
     pub arity: usize,
     pub chunk: Chunk,
     pub name: String,
+}
+
+#[derive(Clone)]
+pub struct NativeFunction {
+    pub name: String,
+    pub function: Rc<dyn Fn(&[Value]) -> Value>,
+}
+
+impl Hash for NativeFunction {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        self.name.hash(h);
+        Rc::as_ptr(&self.function).hash(h);
+    }
+}
+impl Display for NativeFunction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "<native fn {}>", self.name)
+    }
 }
 
 impl Debug for Function {
@@ -42,6 +61,7 @@ pub enum Value {
     Nil,
     Number(f64),
     Boolean(bool),
+    NativeFunction(NativeFunction),
     Obj(*mut Obj),
 }
 
@@ -55,6 +75,9 @@ impl Hash for Value {
                 h.write_u64(i);
             }
             Boolean(b) => h.write_u8(*b as u8),
+            NativeFunction(nf) => {
+                nf.hash(h);
+            },
             Obj(ptr) => {
                 let obj: &self::Obj = unsafe { &**ptr };
                 obj.hash(h);
@@ -124,6 +147,7 @@ impl Display for Value {
             Value::Nil => write!(f, "nil"),
             Value::Number(n) => write!(f, "{}", n),
             Value::Boolean(b) => write!(f, "{}", b),
+            Value::NativeFunction(nf) => write!(f, "{}", nf),
             Value::Obj(ptr) => {
                 write!(f, "{}", unsafe { &**ptr })
             }
@@ -137,8 +161,9 @@ impl Debug for Value {
             Value::Nil => write!(f, "Nil"),
             Value::Number(n) => write!(f, "Number({})", n),
             Value::Boolean(b) => write!(f, "Boolean({})", b),
+            Value::NativeFunction(nf) => write!(f, "NativeFunction({})", nf),
             Value::Obj(ptr) => {
-                write!(f, "Obj({:p} => {:?})", *ptr, unsafe { &**ptr })
+                write!(f, "Obj({:?})", unsafe { &**ptr })
             }
         }
     }
