@@ -17,10 +17,16 @@ pub struct Function {
     pub name: String,
 }
 
+impl Function {
+    pub fn line(&self, pc: usize) -> Option<usize> {
+        self.chunk.lines.get(pc).cloned()
+    }
+}
+
 #[derive(Clone)]
 pub struct NativeFunction {
     pub name: String,
-    pub function: Rc<dyn Fn(&[Value]) -> Value>,
+    pub function: Rc<dyn Fn(&[Value]) -> Value>, // TODO: this should return a Result
 }
 
 impl Hash for NativeFunction {
@@ -77,7 +83,7 @@ impl Hash for Value {
             Boolean(b) => h.write_u8(*b as u8),
             NativeFunction(nf) => {
                 nf.hash(h);
-            },
+            }
             Obj(ptr) => {
                 let obj: &self::Obj = unsafe { &**ptr };
                 obj.hash(h);

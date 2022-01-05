@@ -138,7 +138,6 @@ impl Compiler {
             function,
             function_type: FunctionType::Script,
         }
-
     }
 }
 
@@ -282,16 +281,40 @@ impl Parser {
     fn function(&mut self, function_type: FunctionType) {
         let compilers = self.compilers.len();
         self.compilers.push(Compiler::new(self.allocator.clone()));
-        self.compilers.last_mut().unwrap().function.function_mut().unwrap().name = self.previous.as_ref().unwrap().value.clone();
+        self.compilers
+            .last_mut()
+            .unwrap()
+            .function
+            .function_mut()
+            .unwrap()
+            .name = self.previous.as_ref().unwrap().value.clone();
         self.compilers.last_mut().unwrap().function_type = function_type;
 
         self.begin_scope();
         self.consume(TokenType::LeftParen, "Expect '(' after function name");
         if !self.check(TokenType::RightParen) {
             loop {
-                self.compilers.last_mut().unwrap().function.function_mut().unwrap().arity += 1;
-                if self.compilers.last().unwrap().function.function().unwrap().arity > 255 {
-                    self.error(self.scanner.line(), "Can't have more than 255 parameters".into());
+                self.compilers
+                    .last_mut()
+                    .unwrap()
+                    .function
+                    .function_mut()
+                    .unwrap()
+                    .arity += 1;
+                if self
+                    .compilers
+                    .last()
+                    .unwrap()
+                    .function
+                    .function()
+                    .unwrap()
+                    .arity
+                    > 255
+                {
+                    self.error(
+                        self.scanner.line(),
+                        "Can't have more than 255 parameters".into(),
+                    );
                 }
                 let constant = self.parse_variable("Expected parameter name");
                 self.define_variable(constant);
@@ -335,7 +358,7 @@ impl Parser {
     }
 
     fn return_statement(&mut self) {
-        if self.compilers.last().unwrap().function_type  == FunctionType::Script {
+        if self.compilers.last().unwrap().function_type == FunctionType::Script {
             self.error(self.scanner.line(), "Can't return from top level".into());
         }
 
@@ -622,13 +645,16 @@ impl Parser {
     }
 
     fn argument_list(&mut self) -> u8 {
-        let mut arg_count : usize = 0;
+        let mut arg_count: usize = 0;
 
         if !self.check(TokenType::RightParen) {
             loop {
                 self.expression();
                 if arg_count == 255 {
-                    self.error(self.scanner.line(), "Can't have more than 255 arguments".into());
+                    self.error(
+                        self.scanner.line(),
+                        "Can't have more than 255 arguments".into(),
+                    );
                 }
                 arg_count += 1;
                 if !self.match_token(TokenType::Comma) {
@@ -666,7 +692,13 @@ impl Parser {
             return;
         }
         let scope_depth = self.compilers.last().unwrap().scope_depth;
-        self.compilers.last_mut().unwrap().locals.last_mut().unwrap().depth = scope_depth;
+        self.compilers
+            .last_mut()
+            .unwrap()
+            .locals
+            .last_mut()
+            .unwrap()
+            .depth = scope_depth;
     }
 
     fn get_rule(&self, operator_type: TokenType) -> ParseRule {
@@ -808,7 +840,15 @@ impl Parser {
         self.compilers.last_mut().unwrap().scope_depth -= 1;
 
         while !self.compilers.last_mut().unwrap().locals.is_empty()
-            && self.compilers.last_mut().unwrap().locals.last().unwrap().depth > self.compilers.last_mut().unwrap().scope_depth
+            && self
+                .compilers
+                .last_mut()
+                .unwrap()
+                .locals
+                .last()
+                .unwrap()
+                .depth
+                > self.compilers.last_mut().unwrap().scope_depth
         {
             self.emit_byte(OpCode::Pop as u8);
             self.compilers.last_mut().unwrap().locals.pop();

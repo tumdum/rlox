@@ -24,12 +24,20 @@ struct Opt {
 fn main() {
     let opt = Opt::from_args();
     let mut vm = VM::new(Rc::new(RefCell::new(std::io::stdout())));
+    vm.register_bulitins();
 
     let result = match opt.script {
         None => vm.repl(),
         Some(script) => vm.run_file(&script),
     };
-    if let Err(e) = result {
-        println!("Final result: {}", e);
+    match result {
+        Ok(_) => {}
+        Err(vm::Error::RuntimeError(e)) => {
+            println!("{}", e);
+            e.print_callstack();
+        }
+        Err(other) => {
+            println!("{}", other);
+        }
     }
 }

@@ -1,7 +1,7 @@
 use crate::allocator::Allocator;
 use crate::chunk::InvalidOpCode;
 use crate::compiler::Parser;
-use crate::value::{NativeFunction, Function, Obj, Value};
+use crate::value::{Function, NativeFunction, Obj, Value};
 use crate::{Chunk, OpCode};
 use std::cell::RefCell;
 use std::collections::hash_map::Entry::*;
@@ -11,17 +11,19 @@ use std::path::Path;
 use std::rc::Rc;
 use thiserror::Error;
 
-const MAX_CALL_STACK_DEPTH : usize = 1000;
+const MAX_CALL_STACK_DEPTH: usize = 1000;
 
 macro_rules! binary_op {
     ($target: expr, $op: tt) => {{
-        let b = match $target.pop()? {
+        let b_val = $target.pop()?;
+        let a_val = $target.pop()?;
+        let b = match &b_val {
             Value::Number(b) => b,
-            other => return Err(Error::InvalidOperand("Number".to_owned(), other)),
+            other => return Err($target.new_runtime_error(RuntimeProblem::InvalidOperands(a_val, stringify!($op).to_owned(), b_val))),
         };
-        let a = match $target.pop()? {
+        let a = match &a_val {
             Value::Number(a) => a,
-            other => return Err(Error::InvalidOperand("Number".to_owned(), other)),
+            other => return Err($target.new_runtime_error(RuntimeProblem::InvalidOperands(a_val, stringify!($op).to_owned(), b_val))),
         };
 
         let result = a $op b;
@@ -30,27 +32,53 @@ macro_rules! binary_op {
 }
 
 #[derive(Debug, Error)]
-pub enum Error {
-    #[error("Run time error: {0}")]
-    InvalidOpCode(#[from] InvalidOpCode),
+pub enum RuntimeProblem {
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Invalid operand, expected {0}, got {1:?}")]
     InvalidOperand(String, Value),
-    #[error("Invalid operands for '{1}': {0:?} {2:?}")]
+    #[error("Invalid operands for '{1}': '{0}' and '{2}'")]
     InvalidOperands(Value, String, Value),
     #[error("Compilation failed")]
-    CompilationFailed,
-    #[error("Pop from empty stack")]
     PopFromEmptyStack,
     #[error("Undefined global variable '{0}'")]
     UndefinedGlobalVariable(String),
     #[error("Tried to call non callable value: {0}")]
     CallToNonCallableValue(Value),
-    #[error("Tried to call with invalid number of arguments. Expected {expected}, passed {passed}")]
-    InvalidNumberOfArguments{expected: usize, passed: usize},
+    #[error(
+        "Tried to call with invalid number of arguments. Expected {expected}, passed {passed}"
+    )]
+    InvalidNumberOfArguments { expected: usize, passed: usize },
     #[error("Maximum call stack depth reached {MAX_CALL_STACK_DEPTH}")]
     MaxCallStackDepthReached,
+}
+
+#[derive(Debug, Error)]
+#[error("Runtime error: {problem}")]
+pub struct RuntimeError {
+    callstack: Vec<String>,
+    problem: RuntimeProblem,
+}
+
+impl RuntimeError {
+    pub fn print_callstack(&self) {
+        println!("Callstack:");
+        for (i, frame) in self.callstack.iter().enumerate() {
+            println!("{:>3}: {}", i, frame);
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("Run time error: {0}")]
+    InvalidOpCode(#[from] InvalidOpCode),
+    #[error("I/O error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("Compilation failed")]
+    CompilationFailed,
+    #[error("{0}")]
+    RuntimeError(#[from] RuntimeError),
 }
 
 #[derive(Debug)]
@@ -88,12 +116,42 @@ impl VM {
         }
     }
 
+    fn current_callstack(&self) -> Vec<String> {
+        self.frames
+            .iter()
+            .map(|frame| (frame.function.function().unwrap(), frame.pc))
+            .map(|(fun, pc)| format!("{:?}, line {:?}", fun, fun.line(pc)))
+            .rev()
+            .collect()
+    }
+
     fn current_frame(&self) -> &CallFrame {
         self.frames.last().unwrap()
     }
 
     fn current_frame_mut(&mut self) -> &mut CallFrame {
         self.frames.last_mut().unwrap()
+    }
+
+    pub fn register_bulitins(&mut self) {
+        self.define_native("time", move |args| {
+            match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                Ok(t) => t.as_secs_f64().into(),
+                Err(_) => Value::Nil,
+            }
+        });
+        let output_clone = self.output.clone();
+        self.define_native("println", move |args| {
+            for (i, arg) in args.into_iter().enumerate() {
+                if i == 0 {
+                    write!(output_clone.borrow_mut(), "{}", arg);
+                } else {
+                    write!(output_clone.borrow_mut(), " {}", arg);
+                }
+            }
+            writeln!(output_clone.borrow_mut());
+            Value::Nil
+        });
     }
 
     fn read_byte(&mut self) -> u8 {
@@ -135,46 +193,66 @@ impl VM {
         self.stack.push(v);
     }
 
+    fn new_runtime_error(&self, problem: RuntimeProblem) -> Error {
+        Error::RuntimeError(RuntimeError {
+            callstack: self.current_callstack(),
+            problem,
+        })
+    }
+
     fn pop(&mut self) -> Result<Value, Error> {
-        self.stack.pop().ok_or(Error::PopFromEmptyStack)
+        self.stack
+            .pop()
+            .ok_or(self.new_runtime_error(RuntimeProblem::PopFromEmptyStack))
     }
 
     fn peek(&self, offset: usize) -> Result<Value, Error> {
-        self.stack.get(self.stack.len()-1-offset).cloned().ok_or(Error::PopFromEmptyStack)
+        self.stack
+            .get(self.stack.len() - 1 - offset)
+            .cloned()
+            .ok_or(self.new_runtime_error(RuntimeProblem::PopFromEmptyStack))
     }
 
     fn call_value(&mut self, callee: Value, arg_count: u8) -> Result<(), Error> {
         match callee.function() {
             Some(fun) => {
                 if arg_count as usize != fun.arity {
-                    return Err(Error::InvalidNumberOfArguments{expected: fun.arity, passed: arg_count as usize})
+                    return Err(
+                        self.new_runtime_error(RuntimeProblem::InvalidNumberOfArguments {
+                            expected: fun.arity,
+                            passed: arg_count as usize,
+                        }),
+                    );
                 }
                 self.call(callee, arg_count)
-            },
+            }
             None => {
                 if let Value::NativeFunction(nf) = callee {
                     let l = self.stack.len();
-                    let ret = (nf.function)(&self.stack[l-arg_count as usize..]);
-                    self.stack.drain((l-arg_count as usize-1)..);
+                    let ret = (nf.function)(&self.stack[l - arg_count as usize..]);
+                    self.stack.drain((l - arg_count as usize - 1)..);
                     self.stack.push(ret);
                     Ok(())
                 } else {
-                    Err(Error::CallToNonCallableValue(callee))
+                    Err(self.new_runtime_error(RuntimeProblem::CallToNonCallableValue(callee)))
                 }
             }
         }
     }
 
-    fn define_native(&mut self, name: &str, f: impl Fn(&[Value])->Value + 'static) {
-        self.globals.insert(name.to_owned(), Value::NativeFunction(NativeFunction{
-            name: name.to_owned(),
-            function: Rc::new(f),
-        }));
+    fn define_native(&mut self, name: &str, f: impl Fn(&[Value]) -> Value + 'static) {
+        self.globals.insert(
+            name.to_owned(),
+            Value::NativeFunction(NativeFunction {
+                name: name.to_owned(),
+                function: Rc::new(f),
+            }),
+        );
     }
 
     fn call(&mut self, function: Value, arg_count: u8) -> Result<(), Error> {
         if self.frames.len() > MAX_CALL_STACK_DEPTH {
-            return Err(Error::MaxCallStackDepthReached)
+            return Err(self.new_runtime_error(RuntimeProblem::MaxCallStackDepthReached));
         }
         self.frames.push(CallFrame {
             function,
@@ -208,19 +286,19 @@ impl VM {
                 OpCode::Call => {
                     let arg_count = self.read_byte();
                     self.call_value(self.peek(arg_count as usize)?, arg_count)?;
-                },
+                }
                 OpCode::Return => {
                     let result = self.pop()?;
                     let frame = self.frames.pop();
                     if self.frames.is_empty() {
-                        return Ok(())
+                        return Ok(());
                     }
-                    self.stack.drain((frame.unwrap().slots_offset-1)..);
+                    self.stack.drain((frame.unwrap().slots_offset - 1)..);
                     self.push(result);
                 }
                 OpCode::Print => {
                     let value = self.pop()?;
-                    writeln!(self.output.borrow_mut(), "{}", value)?;
+                    writeln!(self.output.borrow_mut(), "{}", value)?; // TODO: this is a runtime error!
                 }
                 OpCode::Greater => {
                     let b = self.pop()?;
@@ -248,20 +326,22 @@ impl VM {
                                     self.allocator.borrow_mut().allocate_string(tmp)
                                 }
                                 (_, _) => {
-                                    return Err(Error::InvalidOperands(
-                                        a.clone(),
-                                        "+".to_owned(),
-                                        b.clone(),
+                                    return Err(self.new_runtime_error(
+                                        RuntimeProblem::InvalidOperands(
+                                            a.clone(),
+                                            "+".to_owned(),
+                                            b.clone(),
+                                        ),
                                     ))
                                 }
                             }
                         },
                         _ => {
-                            return Err(Error::InvalidOperands(
+                            return Err(self.new_runtime_error(RuntimeProblem::InvalidOperands(
                                 a.clone(),
                                 "+".to_owned(),
                                 b.clone(),
-                            ))
+                            )))
                         }
                     };
                     self.push(result);
@@ -275,9 +355,14 @@ impl VM {
                 }
                 OpCode::Negate => {
                     let val = self.pop()?;
-                    match val {
+                    match &val {
                         Value::Number(n) => self.push(-n),
-                        other => return Err(Error::InvalidOperand("Number".to_owned(), other)),
+                        other => {
+                            return Err(self.new_runtime_error(RuntimeProblem::InvalidOperand(
+                                "-".to_owned(),
+                                val,
+                            )))
+                        }
                     }
                 }
                 OpCode::Constant => {
@@ -308,7 +393,9 @@ impl VM {
                             self.push(value);
                         }
                         Vacant(e) => {
-                            return Err(Error::UndefinedGlobalVariable(e.key().to_owned()))
+                            let key = e.key().to_owned();
+                            return Err(self
+                                .new_runtime_error(RuntimeProblem::UndefinedGlobalVariable(key)));
                         }
                     }
                 }
@@ -326,7 +413,9 @@ impl VM {
                             e.insert(value);
                         }
                         Vacant(e) => {
-                            return Err(Error::UndefinedGlobalVariable(e.key().to_owned()))
+                            let key = e.key().to_owned();
+                            return Err(self
+                                .new_runtime_error(RuntimeProblem::UndefinedGlobalVariable(key)));
                         }
                     }
                 }
@@ -346,7 +435,14 @@ impl VM {
             let mut line = String::new();
             std::io::stdin().read_line(&mut line)?;
 
-            self.interpret(&line)?;
+            match self.interpret(&line) {
+                Ok(_) => {}
+                Err(Error::RuntimeError(e)) => {
+                    println!("{}", e);
+                    e.print_callstack();
+                }
+                other => return other,
+            }
         }
     }
 
@@ -563,15 +659,31 @@ for (var a = 1; a < 14; a = a + 1) {
 
     #[test]
     fn functions() {
-        test_eval!("fun areWeThereYet() { print 1; } print areWeThereYet;", "<fn areWeThereYet>");
+        test_eval!(
+            "fun areWeThereYet() { print 1; } print areWeThereYet;",
+            "<fn areWeThereYet>"
+        );
         test_eval!("fun x(a) { print a; } x(1);", "1");
         test_eval!("fun x(a,b,c) { print a + b + c; } x(1,100,10000);", "10101");
-        test_eval!(r#"var a = 999.3; fun x(a) { print a; } x("test"); print a;"#, "test\n999.3");
-        test_eval!(r#"var a = 999.3; fun x(a,b,c) { print a + b + c; } x("1","100","10000"); print a;"#, "110010000\n999.3");
+        test_eval!(
+            r#"var a = 999.3; fun x(a) { print a; } x("test"); print a;"#,
+            "test\n999.3"
+        );
+        test_eval!(
+            r#"var a = 999.3; fun x(a,b,c) { print a + b + c; } x("1","100","10000"); print a;"#,
+            "110010000\n999.3"
+        );
         test_eval!(r#"fun x(a) { print a; } x("test"); x("foo");"#, "test\nfoo");
-        test_eval!(r#"fun x(a) { return 100 * a; } print x(1); print x(13);"#, "100\n1300");
-        test_eval!(r#"fun x() { return 100; } fun y() { print x() + x(); } y();"#, "200");
-        test_eval!(r#"
+        test_eval!(
+            r#"fun x(a) { return 100 * a; } print x(1); print x(13);"#,
+            "100\n1300"
+        );
+        test_eval!(
+            r#"fun x() { return 100; } fun y() { print x() + x(); } y();"#,
+            "200"
+        );
+        test_eval!(
+            r#"
 fun fib(n) {
     if (n == 1) {
         return 0;
@@ -585,21 +697,30 @@ fun fib(n) {
 for (var a = 1; a < 15; a = a + 1) {
     print fib(a);
 }
-            "#, "0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n55\n89\n144\n233");
-        test_eval!(r#"
+            "#,
+            "0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n55\n89\n144\n233"
+        );
+        test_eval!(
+            r#"
 fun fact(n) {
     if (n <= 1) { return 1; }
     return n * fact(n-1);
 }
-print fact(11);"#, "39916800");
+print fact(11);"#,
+            "39916800"
+        );
     }
     #[test]
     fn native_functions() {
         let output = Rc::new(RefCell::new(vec![]));
         let output_clone = output.clone();
         let mut vm = VM::new(output.clone());
-        vm.define_native("println", move |args| { writeln!(output_clone.borrow_mut(), "{:?}", args); Value::Nil });
-            let got = vm.interpret(r#"
+        vm.define_native("println", move |args| {
+            writeln!(output_clone.borrow_mut(), "{:?}", args);
+            Value::Nil
+        });
+        let got = vm.interpret(
+            r#"
 println(1,nil,"test");
 fun x() { return 13; }
 println(x, x(), 4);
@@ -610,11 +731,12 @@ fun fact(n) {
     return tmp;
 }
 println(fact(5));
-"#);
-            assert_matches!(got, Ok(_));
-            let output = std::str::from_utf8(&output.borrow()).unwrap().to_owned();
-            let output = output.trim();
-            assert_eq!(
+"#,
+        );
+        assert_matches!(got, Ok(_));
+        let output = std::str::from_utf8(&output.borrow()).unwrap().to_owned();
+        let output = output.trim();
+        assert_eq!(
                 output,
                 "[Number(1), Nil, Obj(String(\"test\"))]\n[Obj(Function(<fn x@0>)), Number(13), Number(4)]\n[Number(2)]\n[Number(6)]\n[Number(24)]\n[Number(120)]\n[Number(120)]"
             );
