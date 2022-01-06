@@ -61,7 +61,8 @@ pub enum OpCode {
     JumpIfFalse = 21,
     Loop = 22,
     Call = 23,
-    Return = 24,
+    Closure = 24,
+    Return = 25,
 }
 
 #[derive(Debug, Error)]
@@ -97,7 +98,8 @@ impl TryFrom<u8> for OpCode {
             21 => Ok(OpCode::JumpIfFalse),
             22 => Ok(OpCode::Loop),
             23 => Ok(OpCode::Call),
-            24 => Ok(OpCode::Return),
+            24 => Ok(OpCode::Closure),
+            25 => Ok(OpCode::Return),
             other => Err(InvalidOpCode(other)),
         }
     }

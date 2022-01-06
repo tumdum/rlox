@@ -48,6 +48,15 @@ impl Chunk {
             Ok(OpCode::JumpIfFalse) => self.jump_instruction("OP_JUMP_IF_FALSE", 1, offset),
             Ok(OpCode::Loop) => self.jump_instruction("OP_JUMP", -1, offset),
             Ok(OpCode::Call) => self.byte_instruction("OP_CALL", offset),
+            Ok(OpCode::Closure) => {
+                let offset = offset + 2;
+                let constant = self.code[offset - 1] as usize;
+                println!(
+                    "{:>16} {:4} '{:?}'",
+                    "OP_CLOSURE", constant, self.constants[constant]
+                );
+                offset
+            }
             Ok(OpCode::Return) => simple_instruction("OP_RETURN", offset),
             _other => {
                 println!("Unknown opcode {}", instruction);

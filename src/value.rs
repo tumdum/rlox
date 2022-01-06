@@ -2,6 +2,7 @@ use crate::chunk::Chunk;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use thiserror::Error;
 
@@ -9,6 +10,33 @@ use thiserror::Error;
 pub enum Error {
     // todo in future
 }
+
+#[derive(Clone, PartialEq, PartialOrd, Hash)]
+pub struct Closure {
+    pub function: Value,
+}
+
+impl Debug for Closure {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        let fun = self.function.function().unwrap();
+        write!(f, "<fn {}@{}>", fun.name, fun.arity)
+    }
+}
+
+/*
+impl Deref for Closure {
+    type Target = Function;
+    fn deref(&self) -> &Function {
+        self.function.function().unwrap()
+    }
+}
+
+impl DerefMut for Closure {
+    fn deref_mut(&mut self) -> &mut Function {
+        self.function.function_mut().unwrap()
+    }
+}
+*/
 
 #[derive(Clone, Default, PartialEq, PartialOrd, Hash)]
 pub struct Function {
@@ -35,6 +63,7 @@ impl Hash for NativeFunction {
         Rc::as_ptr(&self.function).hash(h);
     }
 }
+
 impl Display for NativeFunction {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "<native fn {}>", self.name)
@@ -51,13 +80,15 @@ impl Debug for Function {
 pub enum Obj {
     String(String),
     Function(Function),
+    Closure(Closure),
 }
 
 impl Display for Obj {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             Self::String(s) => write!(f, "{}", s),
-            Self::Function(Function { name, .. }) => write!(f, "<fn {}>", name),
+            Self::Function(function) => function.fmt(f),
+            Self::Closure(closure) => closure.function.function().unwrap().fmt(f),
         }
     }
 }
@@ -110,7 +141,7 @@ impl Value {
         if let Value::Obj(ptr) = self {
             let obj: &mut Obj = unsafe { &mut **ptr };
             if let Obj::Function(ref mut f) = obj {
-                return Some(f);
+                return Some(&mut *f);
             }
         }
         None
@@ -120,7 +151,26 @@ impl Value {
         if let Value::Obj(ptr) = self {
             let obj: &Obj = unsafe { &**ptr };
             if let Obj::Function(f) = obj {
-                return Some(f);
+                return Some(&*f);
+            }
+        }
+        None
+    }
+
+    pub fn closure_mut(&mut self) -> Option<&mut Closure> {
+        if let Value::Obj(ptr) = self {
+            let obj: &mut Obj = unsafe { &mut **ptr };
+            if let Obj::Closure(ref mut f) = obj {
+                return Some(&mut *f);
+            }
+        }
+        None
+    }
+    pub fn closure(&self) -> Option<&Closure> {
+        if let Value::Obj(ptr) = self {
+            let obj: &Obj = unsafe { &**ptr };
+            if let Obj::Closure(f) = obj {
+                return Some(&*f);
             }
         }
         None
@@ -145,6 +195,24 @@ impl Value {
         }
         todo!()
     }
+
+    pub fn callable(&self) -> Option<Callable> {
+        match self {
+            Self::NativeFunction(nf) => Some(Callable::Native(nf)),
+            Self::Obj(ptr) => match unsafe { &**ptr } {
+                Obj::Function(f) => Some(Callable::Function(f)),
+                Obj::Closure(c) => Some(Callable::Closure(c)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+pub enum Callable<'a> {
+    Function(&'a Function),
+    Closure(&'a Closure),
+    Native(&'a NativeFunction),
 }
 
 impl Display for Value {

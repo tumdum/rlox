@@ -332,7 +332,7 @@ impl Parser {
         assert_eq!(compilers, self.compilers.len());
 
         let constant = self.make_constant(fun).unwrap();
-        self.emit_bytes(OpCode::Constant as u8, constant);
+        self.emit_bytes(OpCode::Closure as u8, constant);
     }
 
     fn var_declaration(&mut self) {

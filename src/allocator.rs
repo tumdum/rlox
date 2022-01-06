@@ -1,4 +1,4 @@
-use crate::value::{Function, Obj, Value};
+use crate::value::{Closure, Function, Obj, Value};
 use std::collections::HashSet;
 use std::mem::transmute;
 
@@ -19,20 +19,22 @@ impl Allocator {
     pub fn allocate_string(&mut self, v: String) -> Value {
         let b = Box::new(Obj::String(v));
         let obj = Box::into_raw(b);
-        debug_assert!(!self.all_objects.contains(&(obj as *const Obj)));
-        let value = Value::Obj(obj);
-        if self.values.contains(&value) {
-            self.values.get(&value).unwrap().clone()
-        } else {
-            self.all_objects.push(obj);
-            self.values.insert(value.clone());
-            value
-        }
+        self.record_ptr(obj)
+    }
+
+    pub fn allocate_closure(&mut self, function: Value) -> Value {
+        let b = Box::new(Obj::Closure(Closure { function }));
+        let obj = Box::into_raw(b);
+        self.record_ptr(obj)
     }
 
     pub fn allocate_function(&mut self, f: Function) -> Value {
         let b = Box::new(Obj::Function(f));
         let obj = Box::into_raw(b);
+        self.record_ptr(obj)
+    }
+
+    fn record_ptr(&mut self, obj: *mut Obj) -> Value {
         debug_assert!(!self.all_objects.contains(&(obj as *const Obj)));
         let value = Value::Obj(obj);
         if self.values.contains(&value) {

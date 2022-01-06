@@ -1,7 +1,7 @@
 use crate::allocator::Allocator;
 use crate::chunk::InvalidOpCode;
 use crate::compiler::Parser;
-use crate::value::{Function, NativeFunction, Obj, Value};
+use crate::value::{Callable, Closure, Function, NativeFunction, Obj, Value};
 use crate::{Chunk, OpCode};
 use fxhash::FxHashMap;
 use std::cell::RefCell;
@@ -83,25 +83,25 @@ pub enum Error {
 
 #[derive(Debug)]
 struct CallFrame {
-    function: Value,
+    closure: Value,
     pc: usize,
     slots_offset: usize,
 }
 
 impl CallFrame {
-    fn new(function: Value, slots_offset: usize) -> Self {
+    fn new(closure: Value, slots_offset: usize) -> Self {
         Self {
-            function,
+            closure,
             slots_offset,
             pc: 0,
         }
     }
 
-    fn function_mut(&mut self) -> &mut Function {
-        self.function.function_mut().unwrap()
+    fn function_mut(&mut self) -> &mut Closure {
+        self.closure.closure_mut().unwrap()
     }
-    fn function(&self) -> &Function {
-        self.function.function().unwrap()
+    fn function(&self) -> &Closure {
+        self.closure.closure().unwrap()
     }
 }
 
@@ -127,7 +127,7 @@ impl VM {
     fn current_callstack(&self) -> Vec<String> {
         self.frames
             .iter()
-            .map(|frame| (frame.function.function().unwrap(), frame.pc))
+            .map(|frame| (frame.function().function.function().unwrap(), frame.pc))
             .map(|(fun, pc)| {
                 format!(
                     "{:?}, line {}",
@@ -171,7 +171,14 @@ impl VM {
     }
 
     fn read_byte(&mut self) -> u8 {
-        let ret = self.current_frame().function().chunk.code[self.current_frame().pc];
+        let ret = self
+            .current_frame()
+            .function()
+            .function
+            .function()
+            .unwrap()
+            .chunk
+            .code[self.current_frame().pc];
         self.current_frame_mut().pc += 1;
         ret
     }
@@ -182,12 +189,25 @@ impl VM {
 
     fn read_constant(&mut self) -> &Value {
         let constant_index = self.read_byte() as usize;
-        &self.current_frame().function().chunk.constants[constant_index]
+        &self
+            .current_frame()
+            .function()
+            .function
+            .function()
+            .unwrap()
+            .chunk
+            .constants[constant_index]
     }
 
     fn read_u16(&mut self) -> u16 {
         let pc = self.current_frame().pc;
-        let chunk: &Chunk = &self.current_frame().function().chunk;
+        let chunk: &Chunk = &self
+            .current_frame()
+            .function()
+            .function
+            .function()
+            .unwrap()
+            .chunk;
         let ret = ((chunk.code[pc] as u16) << 8) | (chunk.code[pc + 1]) as u16;
         self.current_frame_mut().pc += 2;
         ret
@@ -199,6 +219,9 @@ impl VM {
         println!("    frames: {:?}", self.frames);
         self.current_frame()
             .function()
+            .function
+            .function()
+            .unwrap()
             .chunk
             .disassemble_instruction(self.current_frame().pc);
         println!();
@@ -230,6 +253,42 @@ impl VM {
     }
 
     fn call_value(&mut self, callee: Value, arg_count: u8) -> Result<(), Error> {
+        match callee.callable() {
+            Some(Callable::Function(fun)) => {
+                /*
+                if arg_count as usize != fun.arity {
+                    return Err(
+                        self.new_runtime_error(RuntimeProblem::InvalidNumberOfArguments {
+                            expected: fun.arity,
+                            passed: arg_count as usize,
+                        }),
+                    );
+                }
+                self.call(callee, arg_count)
+                */
+                unreachable!()
+            }
+            Some(Callable::Native(nf)) => {
+                let l = self.stack.len();
+                let ret = (nf.function)(&self.stack[l - arg_count as usize..]);
+                self.stack.drain((l - arg_count as usize - 1)..);
+                self.stack.push(ret);
+                Ok(())
+            }
+            Some(Callable::Closure(closure)) => {
+                if arg_count as usize != closure.function.function().unwrap().arity {
+                    return Err(
+                        self.new_runtime_error(RuntimeProblem::InvalidNumberOfArguments {
+                            expected: closure.function.function().unwrap().arity,
+                            passed: arg_count as usize,
+                        }),
+                    );
+                }
+                self.call(callee, arg_count)
+            }
+            None => Err(self.new_runtime_error(RuntimeProblem::CallToNonCallableValue(callee))),
+        }
+        /*
         match callee.function() {
             Some(fun) => {
                 if arg_count as usize != fun.arity {
@@ -254,6 +313,7 @@ impl VM {
                 }
             }
         }
+        */
     }
 
     fn define_native(&mut self, name: &str, f: impl Fn(&[Value]) -> Value + 'static) {
@@ -270,7 +330,10 @@ impl VM {
         if self.frames.len() > MAX_CALL_STACK_DEPTH {
             return Err(self.new_runtime_error(RuntimeProblem::MaxCallStackDepthReached));
         }
-        self.frames.push(CallFrame::new(function, self.stack.len() - arg_count as usize));
+        self.frames.push(CallFrame::new(
+            function,
+            self.stack.len() - arg_count as usize,
+        ));
 
         Ok(())
     }
@@ -381,6 +444,11 @@ impl VM {
                     let constant = self.read_constant().clone();
                     self.push(constant);
                 }
+                OpCode::Closure => {
+                    let constant = self.read_constant().clone();
+                    let closure = self.allocator.borrow_mut().allocate_closure(constant);
+                    self.push(closure);
+                }
                 OpCode::Nil => self.push(Value::Nil),
                 OpCode::True => self.push(true),
                 OpCode::False => self.push(false),
@@ -474,7 +542,14 @@ impl VM {
         };
 
         self.push(function.clone());
-        self.frames.push(CallFrame::new(function, self.stack.len() - 1));
+        let closure = self
+            .allocator
+            .borrow_mut()
+            .allocate_closure(function.clone());
+        self.pop();
+        self.push(closure.clone());
+        self.frames
+            .push(CallFrame::new(closure, self.stack.len() - 1));
         self.run()
     }
 }
@@ -668,8 +743,8 @@ for (var a = 1; a < 14; a = a + 1) {
     #[test]
     fn functions() {
         test_eval!(
-            "fun areWeThereYet() { print 1; } print areWeThereYet;",
-            "<fn areWeThereYet>"
+            "fun areWeThereYet(a,b,c) { print 1; } print areWeThereYet;",
+            "<fn areWeThereYet@3>"
         );
         test_eval!("fun x(a) { print a; } x(1);", "1");
         test_eval!("fun x(a,b,c) { print a + b + c; } x(1,100,10000);", "10101");
@@ -746,7 +821,7 @@ println(fact(5));
         let output = output.trim();
         assert_eq!(
                 output,
-                "[Number(1), Nil, Obj(String(\"test\"))]\n[Obj(Function(<fn x@0>)), Number(13), Number(4)]\n[Number(2)]\n[Number(6)]\n[Number(24)]\n[Number(120)]\n[Number(120)]"
+                "[Number(1), Nil, Obj(String(\"test\"))]\n[Obj(Closure(<fn x@0>)), Number(13), Number(4)]\n[Number(2)]\n[Number(6)]\n[Number(24)]\n[Number(120)]\n[Number(120)]"
             );
     }
 
