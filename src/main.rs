@@ -34,7 +34,7 @@ fn main() {
         Ok(_) => {}
         Err(vm::Error::RuntimeError(e)) => {
             println!("{}", e);
-            e.print_callstack();
+            e.print_callstack(std::io::stdout());
         }
         Err(other) => {
             println!("{}", other);

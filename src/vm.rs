@@ -3,9 +3,9 @@ use crate::chunk::InvalidOpCode;
 use crate::compiler::Parser;
 use crate::value::{Function, NativeFunction, Obj, Value};
 use crate::{Chunk, OpCode};
+use fxhash::FxHashMap;
 use std::cell::RefCell;
 use std::collections::hash_map::Entry::*;
-use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::rc::Rc;
@@ -39,7 +39,7 @@ pub enum RuntimeProblem {
     InvalidOperand(String, Value),
     #[error("Invalid operands for '{1}': '{0}' and '{2}'")]
     InvalidOperands(Value, String, Value),
-    #[error("Compilation failed")]
+    #[error("Pop from empty stack")]
     PopFromEmptyStack,
     #[error("Undefined global variable '{0}'")]
     UndefinedGlobalVariable(String),
@@ -61,10 +61,10 @@ pub struct RuntimeError {
 }
 
 impl RuntimeError {
-    pub fn print_callstack(&self) {
-        println!("Callstack:");
+    pub fn print_callstack(&self, mut output: impl Write) {
+        writeln!(output, "Callstack:");
         for (i, frame) in self.callstack.iter().enumerate() {
-            println!("{:>3}: {}", i, frame);
+            writeln!(output, "{:>3}: {}", i, frame);
         }
     }
 }
@@ -89,6 +89,14 @@ struct CallFrame {
 }
 
 impl CallFrame {
+    fn new(function: Value, slots_offset: usize) -> Self {
+        Self {
+            function,
+            slots_offset,
+            pc: 0,
+        }
+    }
+
     fn function_mut(&mut self) -> &mut Function {
         self.function.function_mut().unwrap()
     }
@@ -100,7 +108,7 @@ impl CallFrame {
 pub struct VM {
     stack: Vec<Value>,
     frames: Vec<CallFrame>,
-    globals: HashMap<String, Value>,
+    globals: FxHashMap<String, Value>,
     allocator: Rc<RefCell<Allocator>>,
     output: Rc<RefCell<dyn std::io::Write>>,
 }
@@ -110,7 +118,7 @@ impl VM {
         Self {
             stack: Default::default(),
             frames: Default::default(),
-            globals: HashMap::new(),
+            globals: FxHashMap::default(),
             allocator: Rc::new(RefCell::new(Allocator::default())),
             output,
         }
@@ -120,7 +128,15 @@ impl VM {
         self.frames
             .iter()
             .map(|frame| (frame.function.function().unwrap(), frame.pc))
-            .map(|(fun, pc)| format!("{:?}, line {:?}", fun, fun.line(pc)))
+            .map(|(fun, pc)| {
+                format!(
+                    "{:?}, line {}",
+                    fun,
+                    fun.line(pc)
+                        .map(|i| i.to_string())
+                        .unwrap_or("unknown".to_owned())
+                )
+            })
             .rev()
             .collect()
     }
@@ -164,9 +180,9 @@ impl VM {
         self.read_byte().try_into()
     }
 
-    fn read_constant(&mut self) -> Value {
+    fn read_constant(&mut self) -> &Value {
         let constant_index = self.read_byte() as usize;
-        self.current_frame().function().chunk.constants[constant_index].clone()
+        &self.current_frame().function().chunk.constants[constant_index]
     }
 
     fn read_u16(&mut self) -> u16 {
@@ -203,14 +219,14 @@ impl VM {
     fn pop(&mut self) -> Result<Value, Error> {
         self.stack
             .pop()
-            .ok_or(self.new_runtime_error(RuntimeProblem::PopFromEmptyStack))
+            .ok_or_else(|| self.new_runtime_error(RuntimeProblem::PopFromEmptyStack))
     }
 
     fn peek(&self, offset: usize) -> Result<Value, Error> {
         self.stack
             .get(self.stack.len() - 1 - offset)
             .cloned()
-            .ok_or(self.new_runtime_error(RuntimeProblem::PopFromEmptyStack))
+            .ok_or_else(|| self.new_runtime_error(RuntimeProblem::PopFromEmptyStack))
     }
 
     fn call_value(&mut self, callee: Value, arg_count: u8) -> Result<(), Error> {
@@ -254,11 +270,7 @@ impl VM {
         if self.frames.len() > MAX_CALL_STACK_DEPTH {
             return Err(self.new_runtime_error(RuntimeProblem::MaxCallStackDepthReached));
         }
-        self.frames.push(CallFrame {
-            function,
-            pc: 0,
-            slots_offset: self.stack.len() - arg_count as usize,
-        });
+        self.frames.push(CallFrame::new(function, self.stack.len() - arg_count as usize));
 
         Ok(())
     }
@@ -366,7 +378,7 @@ impl VM {
                     }
                 }
                 OpCode::Constant => {
-                    let constant = self.read_constant();
+                    let constant = self.read_constant().clone();
                     self.push(constant);
                 }
                 OpCode::Nil => self.push(Value::Nil),
@@ -435,12 +447,13 @@ impl VM {
             let mut line = String::new();
             std::io::stdin().read_line(&mut line)?;
 
-            match self.interpret(&line) {
+            match self.interpret(&line.trim()) {
                 Ok(_) => {}
                 Err(Error::RuntimeError(e)) => {
                     println!("{}", e);
-                    e.print_callstack();
+                    e.print_callstack(&mut *self.output.borrow_mut());
                 }
+                Err(Error::CompilationFailed) => {}
                 other => return other,
             }
         }
@@ -461,12 +474,7 @@ impl VM {
         };
 
         self.push(function.clone());
-        self.frames.push(CallFrame {
-            function,
-            pc: 0,
-            slots_offset: self.stack.len() - 1,
-        });
-
+        self.frames.push(CallFrame::new(function, self.stack.len() - 1));
         self.run()
     }
 }
@@ -740,5 +748,42 @@ println(fact(5));
                 output,
                 "[Number(1), Nil, Obj(String(\"test\"))]\n[Obj(Function(<fn x@0>)), Number(13), Number(4)]\n[Number(2)]\n[Number(6)]\n[Number(24)]\n[Number(120)]\n[Number(120)]"
             );
+    }
+
+    #[test]
+    fn callstack() {
+        let output = Rc::new(RefCell::new(vec![]));
+        let output_clone = output.clone();
+        let mut vm = VM::new(output.clone());
+        let got = vm.interpret(
+            r#"fun a() {
+    b();
+}
+fun b() {
+    c();
+}
+fun c() {
+    d();
+    e();
+}
+fun d() {
+    print "hello!";
+}
+fun e() {
+    e(1,2);
+}
+
+a();
+            "#,
+        );
+        let err = got.unwrap_err();
+        let expected_callstack: Vec<String> = vec![
+            "<fn e@0>, line 15".to_owned(),
+            "<fn c@0>, line 9".to_owned(),
+            "<fn b@0>, line 5".to_owned(),
+            "<fn a@0>, line 2".to_owned(),
+            "<fn @0>, line 18".to_owned(),
+        ];
+        assert_matches!(err, Error::RuntimeError(RuntimeError{callstack, ..}) if callstack == expected_callstack);
     }
 }
