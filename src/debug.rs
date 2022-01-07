@@ -55,7 +55,7 @@ impl Chunk {
                 let constant = self.code[offset - 1] as usize;
                 let fun = &self.constants[constant].function().unwrap();
                 println!("{:>16} {:4} '{:?}'", "OP_CLOSURE", constant, fun);
-                for j in 0..fun.upvalue_count {
+                for _ in 0..fun.upvalue_count {
                     let is_local = self.code[offset] == 1;
                     let index = self.code[offset + 1];
                     offset += 2;
@@ -68,6 +68,7 @@ impl Chunk {
                 }
                 offset
             }
+            Ok(OpCode::CloseUpValue) => simple_instruction("OP_CLOSE_UPVALUE", offset),
             Ok(OpCode::Return) => simple_instruction("OP_RETURN", offset),
             _other => {
                 println!("Unknown opcode {}", instruction);

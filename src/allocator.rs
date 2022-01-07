@@ -35,7 +35,10 @@ impl Allocator {
     }
 
     pub fn allocate_upvalue(&mut self, slot: *mut Value) -> Value {
-        let obj = Obj::UpValue(UpValue { location: slot });
+        let obj = Obj::UpValue(UpValue {
+            location: slot,
+            closed: None,
+        });
         self.record_object(obj)
     }
 

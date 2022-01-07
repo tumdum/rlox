@@ -1,8 +1,9 @@
 use crate::allocator::Allocator;
 use crate::chunk::InvalidOpCode;
 use crate::compiler::Parser;
-use crate::value::{Callable, Closure, Function, NativeFunction, Obj, Value};
+use crate::value::{Callable, Closure, NativeFunction, Obj, Value};
 use crate::{Chunk, OpCode};
+use arrayvec::ArrayVec;
 use fxhash::FxHashMap;
 use std::cell::RefCell;
 use std::collections::hash_map::Entry::*;
@@ -12,6 +13,7 @@ use std::rc::Rc;
 use thiserror::Error;
 
 const MAX_CALL_STACK_DEPTH: usize = 1000;
+const MAX_STACK_SIZE: usize = 256;
 
 macro_rules! binary_op {
     ($target: expr, $op: tt) => {{
@@ -19,11 +21,11 @@ macro_rules! binary_op {
         let a_val = $target.pop()?;
         let b = match &b_val {
             Value::Number(b) => b,
-            other => return Err($target.new_runtime_error(RuntimeProblem::InvalidOperands(a_val, stringify!($op).to_owned(), b_val))),
+            _ => return Err($target.new_runtime_error(RuntimeProblem::InvalidOperands(a_val, stringify!($op).to_owned(), b_val))),
         };
         let a = match &a_val {
             Value::Number(a) => a,
-            other => return Err($target.new_runtime_error(RuntimeProblem::InvalidOperands(a_val, stringify!($op).to_owned(), b_val))),
+            _ => return Err($target.new_runtime_error(RuntimeProblem::InvalidOperands(a_val, stringify!($op).to_owned(), b_val))),
         };
 
         let result = a $op b;
@@ -62,9 +64,9 @@ pub struct RuntimeError {
 
 impl RuntimeError {
     pub fn print_callstack(&self, mut output: impl Write) {
-        writeln!(output, "Callstack:");
+        writeln!(output, "Callstack:").unwrap();
         for (i, frame) in self.callstack.iter().enumerate() {
-            writeln!(output, "{:>3}: {}", i, frame);
+            writeln!(output, "{:>3}: {}", i, frame).unwrap();
         }
     }
 }
@@ -97,17 +99,15 @@ impl CallFrame {
         }
     }
 
-    fn function_mut(&mut self) -> &mut Closure {
-        self.closure.closure_mut().unwrap()
-    }
     fn function(&self) -> &Closure {
         self.closure.closure().unwrap()
     }
 }
 
 pub struct VM {
-    stack: Vec<Value>,
-    frames: Vec<CallFrame>,
+    stack: ArrayVec<Value, MAX_STACK_SIZE>,
+    frames: ArrayVec<CallFrame, MAX_CALL_STACK_DEPTH>,
+    open_upvalues: Vec<Value>,
     globals: FxHashMap<String, Value>,
     allocator: Rc<RefCell<Allocator>>,
     output: Rc<RefCell<dyn std::io::Write>>,
@@ -116,8 +116,9 @@ pub struct VM {
 impl VM {
     pub fn new(output: Rc<RefCell<dyn std::io::Write>>) -> Self {
         Self {
-            stack: Default::default(),
-            frames: Default::default(),
+            stack: ArrayVec::<Value, MAX_STACK_SIZE>::default(),
+            frames: ArrayVec::<CallFrame, MAX_CALL_STACK_DEPTH>::default(),
+            open_upvalues: vec![],
             globals: FxHashMap::default(),
             allocator: Rc::new(RefCell::new(Allocator::default())),
             output,
@@ -134,7 +135,7 @@ impl VM {
                     fun,
                     fun.line(pc)
                         .map(|i| i.to_string())
-                        .unwrap_or("unknown".to_owned())
+                        .unwrap_or_else(|| "unknown".to_owned())
                 )
             })
             .rev()
@@ -150,7 +151,7 @@ impl VM {
     }
 
     pub fn register_bulitins(&mut self) {
-        self.define_native("time", move |args| {
+        self.define_native("time", move |_args| {
             match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
                 Ok(t) => t.as_secs_f64().into(),
                 Err(_) => Value::Nil,
@@ -158,14 +159,14 @@ impl VM {
         });
         let output_clone = self.output.clone();
         self.define_native("println", move |args| {
-            for (i, arg) in args.into_iter().enumerate() {
+            for (i, arg) in args.iter().enumerate() {
                 if i == 0 {
-                    write!(output_clone.borrow_mut(), "{}", arg);
+                    write!(output_clone.borrow_mut(), "{}", arg).unwrap();
                 } else {
-                    write!(output_clone.borrow_mut(), " {}", arg);
+                    write!(output_clone.borrow_mut(), " {}", arg).unwrap();
                 }
             }
-            writeln!(output_clone.borrow_mut());
+            writeln!(output_clone.borrow_mut()).unwrap();
             Value::Nil
         });
     }
@@ -254,18 +255,7 @@ impl VM {
 
     fn call_value(&mut self, callee: Value, arg_count: u8) -> Result<(), Error> {
         match callee.callable() {
-            Some(Callable::Function(fun)) => {
-                /*
-                if arg_count as usize != fun.arity {
-                    return Err(
-                        self.new_runtime_error(RuntimeProblem::InvalidNumberOfArguments {
-                            expected: fun.arity,
-                            passed: arg_count as usize,
-                        }),
-                    );
-                }
-                self.call(callee, arg_count)
-                */
+            Some(Callable::Function(_fun)) => {
                 unreachable!()
             }
             Some(Callable::Native(nf)) => {
@@ -288,39 +278,34 @@ impl VM {
             }
             None => Err(self.new_runtime_error(RuntimeProblem::CallToNonCallableValue(callee))),
         }
-        /*
-        match callee.function() {
-            Some(fun) => {
-                if arg_count as usize != fun.arity {
-                    return Err(
-                        self.new_runtime_error(RuntimeProblem::InvalidNumberOfArguments {
-                            expected: fun.arity,
-                            passed: arg_count as usize,
-                        }),
-                    );
-                }
-                self.call(callee, arg_count)
-            }
-            None => {
-                if let Value::NativeFunction(nf) = callee {
-                    let l = self.stack.len();
-                    let ret = (nf.function)(&self.stack[l - arg_count as usize..]);
-                    self.stack.drain((l - arg_count as usize - 1)..);
-                    self.stack.push(ret);
-                    Ok(())
-                } else {
-                    Err(self.new_runtime_error(RuntimeProblem::CallToNonCallableValue(callee)))
-                }
-            }
-        }
-        */
     }
 
     fn capture_upvalue(&mut self, stack_index: usize) -> Value {
-        //local: *mut Value) {
         let local: *mut Value = &mut self.stack[stack_index];
+        for value in &self.open_upvalues {
+            let upvalue = value.upvalue().unwrap();
+            if upvalue.location == local {
+                return value.clone();
+            }
+        }
         let created_upvalue = self.allocator.borrow_mut().allocate_upvalue(local);
-        return created_upvalue;
+        self.open_upvalues.push(created_upvalue.clone());
+        created_upvalue
+    }
+
+    fn close_upvalues(&mut self, last: *mut Value) {
+        // TODO: drain?
+        let mut tmp = vec![];
+        for v in &mut self.open_upvalues {
+            let mut upvalue = v.upvalue_mut().unwrap();
+            if upvalue.location >= last {
+                upvalue.closed = Some((unsafe { &*upvalue.location }).clone());
+                upvalue.location = upvalue.closed.as_mut().unwrap();
+            } else {
+                tmp.push(v.clone());
+            }
+        }
+        self.open_upvalues = tmp;
     }
 
     fn define_native(&mut self, name: &str, f: impl Fn(&[Value]) -> Value + 'static) {
@@ -357,8 +342,7 @@ impl VM {
                         self.current_frame().closure.closure().unwrap().upvalues[slot]
                             .upvalue()
                             .unwrap()
-                            .location
-                            .clone();
+                            .location;
                     let value: Value = unsafe { (&*value).clone() };
                     self.push(value);
                 }
@@ -369,8 +353,7 @@ impl VM {
                         self.current_frame().closure.closure().unwrap().upvalues[slot]
                             .upvalue()
                             .unwrap()
-                            .location
-                            .clone();
+                            .location;
                     unsafe { *value = new_value };
                 }
                 OpCode::Jump => {
@@ -391,13 +374,23 @@ impl VM {
                     let arg_count = self.read_byte();
                     self.call_value(self.peek(arg_count as usize)?, arg_count)?;
                 }
+                OpCode::CloseUpValue => {
+                    let last: *mut Value = self.stack.last_mut().unwrap();
+                    self.close_upvalues(last);
+                    self.pop()?;
+                }
                 OpCode::Return => {
                     let result = self.pop()?;
                     let frame = self.frames.pop();
                     if self.frames.is_empty() {
                         return Ok(());
                     }
-                    self.stack.drain((frame.unwrap().slots_offset - 1)..);
+                    let frame = frame.unwrap();
+                    let frame_stack_start = frame.slots_offset - 1;
+                    debug_assert!(self.stack[frame_stack_start].closure().is_some());
+                    let returning_closure: *mut Value = &mut self.stack[frame_stack_start];
+                    self.close_upvalues(returning_closure);
+                    self.stack.drain(frame_stack_start..);
                     self.push(result);
                 }
                 OpCode::Print => {
@@ -461,7 +454,7 @@ impl VM {
                     let val = self.pop()?;
                     match &val {
                         Value::Number(n) => self.push(-n),
-                        other => {
+                        _ => {
                             return Err(self.new_runtime_error(RuntimeProblem::InvalidOperand(
                                 "-".to_owned(),
                                 val,
@@ -483,7 +476,7 @@ impl VM {
                         .function()
                         .unwrap()
                         .upvalue_count;
-                    for i in 0..upvalue_count {
+                    for _ in 0..upvalue_count {
                         let is_local = self.read_byte() == 1;
                         let index = self.read_byte() as usize;
                         if is_local {
@@ -568,7 +561,7 @@ impl VM {
             let mut line = String::new();
             std::io::stdin().read_line(&mut line)?;
 
-            match self.interpret(&line.trim()) {
+            match self.interpret(line.trim()) {
                 Ok(_) => {}
                 Err(Error::RuntimeError(e)) => {
                     println!("{}", e);
@@ -595,11 +588,8 @@ impl VM {
         };
 
         self.push(function.clone());
-        let closure = self
-            .allocator
-            .borrow_mut()
-            .allocate_closure(function.clone());
-        self.pop();
+        let closure = self.allocator.borrow_mut().allocate_closure(function);
+        self.pop()?;
         self.push(closure.clone());
         self.frames
             .push(CallFrame::new(closure, self.stack.len() - 1));
@@ -848,11 +838,12 @@ print fact(11);"#,
     }
     #[test]
     fn native_functions() {
+        // TODO: use registered builtins
         let output = Rc::new(RefCell::new(vec![]));
         let output_clone = output.clone();
         let mut vm = VM::new(output.clone());
         vm.define_native("println", move |args| {
-            writeln!(output_clone.borrow_mut(), "{:?}", args);
+            writeln!(output_clone.borrow_mut(), "{:?}", args).unwrap();
             Value::Nil
         });
         let got = vm.interpret(
@@ -881,8 +872,7 @@ println(fact(5));
     #[test]
     fn callstack() {
         let output = Rc::new(RefCell::new(vec![]));
-        let output_clone = output.clone();
-        let mut vm = VM::new(output.clone());
+        let mut vm = VM::new(output);
         let got = vm.interpret(
             r#"fun a() {
     b();
@@ -929,6 +919,86 @@ fun outer() {
 outer();
             "#,
             "outside"
+        );
+    }
+
+    #[test]
+    fn closure_captures_variables_not_values() {
+        test_eval!(
+            r#"
+var globalSet;
+var globalGet;
+
+fun main() {
+  var a = "initial";
+
+  fun set() { a = "updated"; }
+  fun get() { print a; }
+
+  globalSet = set;
+  globalGet = get;
+}
+
+main();
+globalGet();
+globalSet();
+globalGet();
+            "#,
+            "initial\nupdated"
+        );
+
+        test_eval!(
+            r#"
+var globalOne;
+var globalTwo;
+
+fun main() {
+    {
+        var a = "one";
+        fun one() {
+            print a;
+        }
+        globalOne = one;
+    }
+
+    {
+        var a = "two";
+        fun two() {
+            print a;
+        }
+        globalTwo = two;
+    }
+}
+
+main();
+globalOne();
+globalTwo();
+        "#,
+            "one\ntwo"
+        );
+        test_eval!(
+            r#"
+var globalOne;
+var globalTwo;
+
+fun main() {
+  for (var a = 1; a <= 2; a = a + 1) {
+    fun closure() {
+      print a;
+    }
+    if (globalOne == nil) {
+      globalOne = closure;
+    } else {
+      globalTwo = closure;
+    }
+  }
+}
+
+main();
+globalOne();
+globalTwo();
+        "#,
+            "3\n3"
         );
     }
 }

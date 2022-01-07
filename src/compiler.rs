@@ -117,6 +117,7 @@ enum FunctionType {
 struct Local {
     name: String,
     depth: isize,
+    is_captured: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -149,7 +150,6 @@ impl Compiler {
     }
 
     fn add_upvalue(&mut self, index: u8, is_local: bool) -> usize {
-        // println!("add_upvalue index {} is_local {}", index, is_local);
         if let Some(idx) = self
             .upvalues
             .iter()
@@ -184,6 +184,7 @@ impl Parser {
         compiler.locals.push(Local {
             name: "".to_owned(),
             depth: 0,
+            is_captured: false,
         });
         Self {
             scanner,
@@ -445,7 +446,7 @@ impl Parser {
                 _ => { /* do nothing */ }
             }
 
-            self.advance();
+            self.advance().unwrap();
         }
     }
 
@@ -496,7 +497,6 @@ impl Parser {
             set_op = OpCode::SetLocal;
         } else {
             arg = self.resolve_upvalue(self.compilers.len() - 1, name);
-            // println!("resolve_upvalue {:?}: {}", name, arg);
             if arg != -1 {
                 get_op = OpCode::GetUpValue;
                 set_op = OpCode::SetUpValue;
@@ -626,7 +626,7 @@ impl Parser {
         let token = self.previous.as_ref().unwrap().clone();
 
         let compiler = self.compilers.last().unwrap();
-        for Local { name, depth } in compiler.locals.iter().rev() {
+        for Local { name, depth, .. } in compiler.locals.iter().rev() {
             if *depth != -1 && *depth < compiler.scope_depth {
                 break;
             }
@@ -650,10 +650,10 @@ impl Parser {
             );
             return;
         }
-        // println!("Adding local {:?} @ {}", name, self.compilers.last().unwrap().scope_depth);
         self.compilers.last_mut().unwrap().locals.push(Local {
             name: name.value,
             depth: -1,
+            is_captured: false,
         });
     }
 
@@ -681,6 +681,7 @@ impl Parser {
 
         let local = self.resolve_local(compiler_id - 1, name);
         if local != -1 {
+            self.compilers[compiler_id - 1].locals[local as usize].is_captured = true;
             return self.add_upvalue(compiler_id, local.try_into().unwrap(), true) as isize;
         }
 
@@ -688,8 +689,7 @@ impl Parser {
         if upvalue != -1 {
             return self.add_upvalue(compiler_id, upvalue.try_into().unwrap(), false) as isize;
         }
-
-        return -1;
+        -1
     }
 
     fn add_upvalue(&mut self, compiler_id: usize, index: u8, is_local: bool) -> usize {
@@ -818,7 +818,7 @@ impl Parser {
         if !self.check(token_type) {
             return false;
         }
-        self.advance();
+        self.advance().unwrap();
         true
     }
 
@@ -910,7 +910,19 @@ impl Parser {
                 .depth
                 > self.compilers.last_mut().unwrap().scope_depth
         {
-            self.emit_byte(OpCode::Pop as u8);
+            if self
+                .compilers
+                .last_mut()
+                .unwrap()
+                .locals
+                .last()
+                .unwrap()
+                .is_captured
+            {
+                self.emit_byte(OpCode::CloseUpValue as u8);
+            } else {
+                self.emit_byte(OpCode::Pop as u8);
+            }
             self.compilers.last_mut().unwrap().locals.pop();
         }
     }

@@ -10,14 +10,6 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new() -> Self {
-        Self {
-            code: vec![],
-            constants: vec![],
-            lines: vec![],
-        }
-    }
-
     pub fn write(&mut self, byte: u8, line: usize) {
         self.code.push(byte);
         self.lines.push(line);
@@ -64,7 +56,8 @@ pub enum OpCode {
     Loop = 24,
     Call = 25,
     Closure = 26,
-    Return = 27,
+    CloseUpValue = 27,
+    Return = 28,
 }
 
 #[derive(Debug, Error)]
@@ -103,7 +96,8 @@ impl TryFrom<u8> for OpCode {
             24 => Ok(OpCode::Loop),
             25 => Ok(OpCode::Call),
             26 => Ok(OpCode::Closure),
-            27 => Ok(OpCode::Return),
+            27 => Ok(OpCode::CloseUpValue),
+            28 => Ok(OpCode::Return),
             other => Err(InvalidOpCode(other)),
         }
     }

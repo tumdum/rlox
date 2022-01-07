@@ -2,13 +2,12 @@ use crate::chunk::Chunk;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    // todo in future
+    // TODO in future :)
 }
 
 #[derive(Clone, PartialEq, PartialOrd, Hash)]
@@ -23,21 +22,6 @@ impl Debug for Closure {
         write!(f, "<fn {}@{}>", fun.name, fun.arity)
     }
 }
-
-/*
-impl Deref for Closure {
-    type Target = Function;
-    fn deref(&self) -> &Function {
-        self.function.function().unwrap()
-    }
-}
-
-impl DerefMut for Closure {
-    fn deref_mut(&mut self) -> &mut Function {
-        self.function.function_mut().unwrap()
-    }
-}
-*/
 
 #[derive(Clone, Default, PartialEq, PartialOrd, Hash)]
 pub struct Function {
@@ -80,7 +64,9 @@ impl Debug for Function {
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub struct UpValue {
-    pub location: *mut Value,
+    // TODO: this could be an enum.
+    pub location: *mut Value, // This could be an index into stack
+    pub closed: Option<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
@@ -184,6 +170,15 @@ impl Value {
         }
         None
     }
+    pub fn upvalue_mut(&mut self) -> Option<&mut UpValue> {
+        if let Value::Obj(ptr) = self {
+            let obj: &mut Obj = unsafe { &mut **ptr };
+            if let Obj::UpValue(ref mut v) = obj {
+                return Some(&mut *v);
+            }
+        }
+        None
+    }
     pub fn upvalue(&self) -> Option<&UpValue> {
         if let Value::Obj(ptr) = self {
             let obj: &Obj = unsafe { &**ptr };
@@ -199,16 +194,6 @@ impl Value {
             let obj: &mut Obj = unsafe { &mut **ptr };
             if let Obj::Function(f) = obj {
                 return &mut f.chunk;
-            }
-        }
-        todo!()
-    }
-
-    pub fn chunk(&self) -> &Chunk {
-        if let Value::Obj(ptr) = self {
-            let obj: &Obj = unsafe { &**ptr };
-            if let Obj::Function(f) = obj {
-                return &f.chunk;
             }
         }
         todo!()
