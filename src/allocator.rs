@@ -1,4 +1,4 @@
-use crate::value::{Closure, Function, Obj, Value};
+use crate::value::{Closure, Function, Obj, UpValue, Value};
 use std::collections::HashSet;
 use std::mem::transmute;
 
@@ -17,24 +17,30 @@ impl Drop for Allocator {
 
 impl Allocator {
     pub fn allocate_string(&mut self, v: String) -> Value {
-        let b = Box::new(Obj::String(v));
-        let obj = Box::into_raw(b);
-        self.record_ptr(obj)
+        let obj = Obj::String(v);
+        self.record_object(obj)
     }
 
     pub fn allocate_closure(&mut self, function: Value) -> Value {
-        let b = Box::new(Obj::Closure(Closure { function }));
-        let obj = Box::into_raw(b);
-        self.record_ptr(obj)
+        let obj = Obj::Closure(Closure {
+            function,
+            upvalues: vec![],
+        });
+        self.record_object(obj)
     }
 
     pub fn allocate_function(&mut self, f: Function) -> Value {
-        let b = Box::new(Obj::Function(f));
-        let obj = Box::into_raw(b);
-        self.record_ptr(obj)
+        let obj = Obj::Function(f);
+        self.record_object(obj)
     }
 
-    fn record_ptr(&mut self, obj: *mut Obj) -> Value {
+    pub fn allocate_upvalue(&mut self, slot: *mut Value) -> Value {
+        let obj = Obj::UpValue(UpValue { location: slot });
+        self.record_object(obj)
+    }
+
+    fn record_object(&mut self, obj: Obj) -> Value {
+        let obj = Box::into_raw(Box::new(obj));
         debug_assert!(!self.all_objects.contains(&(obj as *const Obj)));
         let value = Value::Obj(obj);
         if self.values.contains(&value) {

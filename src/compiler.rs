@@ -149,14 +149,18 @@ impl Compiler {
     }
 
     fn add_upvalue(&mut self, index: u8, is_local: bool) -> usize {
-        println!("add_upvalue index {} is_local {}", index, is_local);
-        if let Some(idx) = self.upvalues.iter().position(|v| v.index == index && v.is_local == is_local) {
+        // println!("add_upvalue index {} is_local {}", index, is_local);
+        if let Some(idx) = self
+            .upvalues
+            .iter()
+            .position(|v| v.index == index && v.is_local == is_local)
+        {
             return idx;
         }
-        self.upvalues.push(UpValue{index, is_local});
+        self.upvalues.push(UpValue { index, is_local });
         let upvalues = self.upvalues.len();
         self.function.function_mut().unwrap().upvalue_count = upvalues;
-        let ret = upvalues-1;
+        let ret = upvalues - 1;
         assert_eq!(self.upvalues[ret].index, index);
         assert_eq!(self.upvalues[ret].is_local, is_local);
         ret
@@ -353,12 +357,10 @@ impl Parser {
         let fun = compiler.function;
 
         assert_eq!(compilers, self.compilers.len());
-        dbg!(&fun.function().unwrap());
 
         let constant = self.make_constant(fun).unwrap();
         self.emit_bytes(OpCode::Closure as u8, constant);
-        dbg!(&self.compilers.last());
-        for UpValue{index, is_local} in compiler.upvalues {
+        for UpValue { index, is_local } in compiler.upvalues {
             self.emit_byte(if is_local { 1 } else { 0 });
             self.emit_byte(index);
         }
@@ -488,13 +490,13 @@ impl Parser {
         let get_op;
         let set_op;
 
-        let mut arg = self.resolve_local(self.compilers.len()-1, name);
+        let mut arg = self.resolve_local(self.compilers.len() - 1, name);
         if arg != -1 {
             get_op = OpCode::GetLocal;
             set_op = OpCode::SetLocal;
         } else {
-            arg = self.resolve_upvalue(self.compilers.len()-1, name);
-            println!("resolve_upvalue {:?}: {}", name, arg);
+            arg = self.resolve_upvalue(self.compilers.len() - 1, name);
+            // println!("resolve_upvalue {:?}: {}", name, arg);
             if arg != -1 {
                 get_op = OpCode::GetUpValue;
                 set_op = OpCode::SetUpValue;
@@ -677,12 +679,12 @@ impl Parser {
             return -1;
         }
 
-        let local = self.resolve_local(compiler_id-1, name);
+        let local = self.resolve_local(compiler_id - 1, name);
         if local != -1 {
             return self.add_upvalue(compiler_id, local.try_into().unwrap(), true) as isize;
         }
 
-        let upvalue = self.resolve_upvalue(compiler_id-1, name);
+        let upvalue = self.resolve_upvalue(compiler_id - 1, name);
         if upvalue != -1 {
             return self.add_upvalue(compiler_id, upvalue.try_into().unwrap(), false) as isize;
         }
@@ -691,7 +693,7 @@ impl Parser {
     }
 
     fn add_upvalue(&mut self, compiler_id: usize, index: u8, is_local: bool) -> usize {
-        self.compilers[compiler_id].add_upvalue( index, is_local)
+        self.compilers[compiler_id].add_upvalue(index, is_local)
     }
 
     fn define_variable(&mut self, global: u8) {

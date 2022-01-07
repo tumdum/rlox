@@ -51,19 +51,20 @@ impl Chunk {
             Ok(OpCode::Loop) => self.jump_instruction("OP_JUMP", -1, offset),
             Ok(OpCode::Call) => self.byte_instruction("OP_CALL", offset),
             Ok(OpCode::Closure) => {
-                let mut offset = offset+2;
+                let mut offset = offset + 2;
                 let constant = self.code[offset - 1] as usize;
                 let fun = &self.constants[constant].function().unwrap();
-                println!(
-                    "{:>16} {:4} '{:?}'",
-                    "OP_CLOSURE", constant, fun
-                );
+                println!("{:>16} {:4} '{:?}'", "OP_CLOSURE", constant, fun);
                 for j in 0..fun.upvalue_count {
                     let is_local = self.code[offset] == 1;
-                    let index = self.code[offset+1];
+                    let index = self.code[offset + 1];
                     offset += 2;
-                    println!("{:04}    |                     {} {}",
-                        offset-2, if is_local  { "local" } else { "upvalue" }, index);
+                    println!(
+                        "{:04}    |                     {} {}",
+                        offset - 2,
+                        if is_local { "local" } else { "upvalue" },
+                        index
+                    );
                 }
                 offset
             }

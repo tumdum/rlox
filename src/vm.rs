@@ -316,6 +316,13 @@ impl VM {
         */
     }
 
+    fn capture_upvalue(&mut self, stack_index: usize) -> Value {
+        //local: *mut Value) {
+        let local: *mut Value = &mut self.stack[stack_index];
+        let created_upvalue = self.allocator.borrow_mut().allocate_upvalue(local);
+        return created_upvalue;
+    }
+
     fn define_native(&mut self, name: &str, f: impl Fn(&[Value]) -> Value + 'static) {
         self.globals.insert(
             name.to_owned(),
@@ -344,9 +351,28 @@ impl VM {
             self.trace();
 
             match self.read_opcode()? {
-                OpCode::GetUpValue | OpCode::SetUpValue => {
-                    todo!()
-                },
+                OpCode::GetUpValue => {
+                    let slot = self.read_byte() as usize;
+                    let value: *mut Value =
+                        self.current_frame().closure.closure().unwrap().upvalues[slot]
+                            .upvalue()
+                            .unwrap()
+                            .location
+                            .clone();
+                    let value: Value = unsafe { (&*value).clone() };
+                    self.push(value);
+                }
+                OpCode::SetUpValue => {
+                    let slot = self.read_byte() as usize;
+                    let new_value = self.peek(0)?;
+                    let value: *mut Value =
+                        self.current_frame().closure.closure().unwrap().upvalues[slot]
+                            .upvalue()
+                            .unwrap()
+                            .location
+                            .clone();
+                    unsafe { *value = new_value };
+                }
                 OpCode::Jump => {
                     let offset = self.read_u16();
                     self.current_frame_mut().pc += offset as usize;
@@ -449,7 +475,31 @@ impl VM {
                 }
                 OpCode::Closure => {
                     let constant = self.read_constant().clone();
-                    let closure = self.allocator.borrow_mut().allocate_closure(constant);
+                    let mut closure = self.allocator.borrow_mut().allocate_closure(constant);
+                    let upvalue_count = closure
+                        .closure()
+                        .unwrap()
+                        .function
+                        .function()
+                        .unwrap()
+                        .upvalue_count;
+                    for i in 0..upvalue_count {
+                        let is_local = self.read_byte() == 1;
+                        let index = self.read_byte() as usize;
+                        if is_local {
+                            let slot_offset = self.current_frame().slots_offset;
+                            let upvalue = self.capture_upvalue(slot_offset + index);
+                            closure.closure_mut().unwrap().upvalues.push(upvalue);
+                        } else {
+                            let upvalue = self.current_frame().closure.closure().unwrap().upvalues
+                                [index]
+                                .clone();
+                            closure.closure_mut().unwrap().upvalues.push(upvalue);
+                        }
+                        debug_assert!(closure.closure().unwrap().upvalues.len() <= upvalue_count);
+                    }
+                    debug_assert!(closure.closure().unwrap().upvalues.len() == upvalue_count);
+
                     self.push(closure);
                 }
                 OpCode::Nil => self.push(Value::Nil),
@@ -863,5 +913,22 @@ a();
             "<fn @0>, line 18".to_owned(),
         ];
         assert_matches!(err, Error::RuntimeError(RuntimeError{callstack, ..}) if callstack == expected_callstack);
+    }
+
+    #[test]
+    fn closure_captures_local_and_doesnt_outlive_it() {
+        test_eval!(
+            r#"
+fun outer() {
+    var x = "outside";
+    fun inner() {
+        print x;
+    }
+    inner();
+}
+outer();
+            "#,
+            "outside"
+        );
     }
 }

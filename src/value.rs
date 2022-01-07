@@ -14,6 +14,7 @@ pub enum Error {
 #[derive(Clone, PartialEq, PartialOrd, Hash)]
 pub struct Closure {
     pub function: Value,
+    pub upvalues: Vec<Value>,
 }
 
 impl Debug for Closure {
@@ -78,10 +79,16 @@ impl Debug for Function {
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
+pub struct UpValue {
+    pub location: *mut Value,
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub enum Obj {
     String(String),
     Function(Function),
     Closure(Closure),
+    UpValue(UpValue),
 }
 
 impl Display for Obj {
@@ -90,6 +97,7 @@ impl Display for Obj {
             Self::String(s) => write!(f, "{}", s),
             Self::Function(function) => function.fmt(f),
             Self::Closure(closure) => closure.function.function().unwrap().fmt(f),
+            Self::UpValue(_location) => todo!(),
         }
     }
 }
@@ -172,6 +180,15 @@ impl Value {
             let obj: &Obj = unsafe { &**ptr };
             if let Obj::Closure(f) = obj {
                 return Some(&*f);
+            }
+        }
+        None
+    }
+    pub fn upvalue(&self) -> Option<&UpValue> {
+        if let Value::Obj(ptr) = self {
+            let obj: &Obj = unsafe { &**ptr };
+            if let Obj::UpValue(v) = obj {
+                return Some(&*v);
             }
         }
         None
