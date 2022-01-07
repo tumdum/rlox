@@ -34,6 +34,8 @@ impl Chunk {
             Ok(OpCode::GetGlobal) => self.constant_instruction("OP_GET_GLOBAL", offset),
             Ok(OpCode::DefineGlobal) => self.constant_instruction("OP_DEFINE_GLOBAL", offset),
             Ok(OpCode::SetGlobal) => self.constant_instruction("OP_SET_GLOBAL", offset),
+            Ok(OpCode::GetUpValue) => self.byte_instruction("OP_GET_UPVALUE", offset),
+            Ok(OpCode::SetUpValue) => self.byte_instruction("OP_SET_UPVALUE", offset),
             Ok(OpCode::Equal) => simple_instruction("OP_EQUAL", offset),
             Ok(OpCode::Greater) => simple_instruction("OP_GREATER", offset),
             Ok(OpCode::Less) => simple_instruction("OP_LESS", offset),
@@ -49,12 +51,20 @@ impl Chunk {
             Ok(OpCode::Loop) => self.jump_instruction("OP_JUMP", -1, offset),
             Ok(OpCode::Call) => self.byte_instruction("OP_CALL", offset),
             Ok(OpCode::Closure) => {
-                let offset = offset + 2;
+                let mut offset = offset+2;
                 let constant = self.code[offset - 1] as usize;
+                let fun = &self.constants[constant].function().unwrap();
                 println!(
                     "{:>16} {:4} '{:?}'",
-                    "OP_CLOSURE", constant, self.constants[constant]
+                    "OP_CLOSURE", constant, fun
                 );
+                for j in 0..fun.upvalue_count {
+                    let is_local = self.code[offset] == 1;
+                    let index = self.code[offset+1];
+                    offset += 2;
+                    println!("{:04}    |                     {} {}",
+                        offset-2, if is_local  { "local" } else { "upvalue" }, index);
+                }
                 offset
             }
             Ok(OpCode::Return) => simple_instruction("OP_RETURN", offset),

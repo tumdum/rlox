@@ -43,6 +43,7 @@ pub struct Function {
     pub arity: usize,
     pub chunk: Chunk,
     pub name: String,
+    pub upvalue_count: usize,
 }
 
 impl Function {

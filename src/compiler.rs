@@ -119,9 +119,16 @@ struct Local {
     depth: isize,
 }
 
+#[derive(Debug, Clone)]
+struct UpValue {
+    index: u8,
+    is_local: bool,
+}
+
 #[derive(Debug)]
 struct Compiler {
     locals: Vec<Local>,
+    upvalues: Vec<UpValue>,
     scope_depth: isize,
     function: Value,
     function_type: FunctionType,
@@ -134,10 +141,25 @@ impl Compiler {
             .allocate_function(Function::default());
         Self {
             locals: vec![],
+            upvalues: vec![],
             scope_depth: 0,
             function,
             function_type: FunctionType::Script,
         }
+    }
+
+    fn add_upvalue(&mut self, index: u8, is_local: bool) -> usize {
+        println!("add_upvalue index {} is_local {}", index, is_local);
+        if let Some(idx) = self.upvalues.iter().position(|v| v.index == index && v.is_local == is_local) {
+            return idx;
+        }
+        self.upvalues.push(UpValue{index, is_local});
+        let upvalues = self.upvalues.len();
+        self.function.function_mut().unwrap().upvalue_count = upvalues;
+        let ret = upvalues-1;
+        assert_eq!(self.upvalues[ret].index, index);
+        assert_eq!(self.upvalues[ret].is_local, is_local);
+        ret
     }
 }
 
@@ -177,7 +199,7 @@ impl Parser {
             self.declaration();
         }
 
-        let function = self.end_compiler();
+        let function = self.end_compiler().function;
 
         if *self.had_error.borrow() {
             None
@@ -327,12 +349,19 @@ impl Parser {
         self.consume(TokenType::LeftBrace, "Expect '{' after function name");
         self.block();
 
-        let fun = self.end_compiler();
+        let compiler = self.end_compiler();
+        let fun = compiler.function;
 
         assert_eq!(compilers, self.compilers.len());
+        dbg!(&fun.function().unwrap());
 
         let constant = self.make_constant(fun).unwrap();
         self.emit_bytes(OpCode::Closure as u8, constant);
+        dbg!(&self.compilers.last());
+        for UpValue{index, is_local} in compiler.upvalues {
+            self.emit_byte(if is_local { 1 } else { 0 });
+            self.emit_byte(index);
+        }
     }
 
     fn var_declaration(&mut self) {
@@ -459,14 +488,21 @@ impl Parser {
         let get_op;
         let set_op;
 
-        let mut arg = self.resolve_local(name);
+        let mut arg = self.resolve_local(self.compilers.len()-1, name);
         if arg != -1 {
             get_op = OpCode::GetLocal;
             set_op = OpCode::SetLocal;
         } else {
-            get_op = OpCode::GetGlobal;
-            set_op = OpCode::SetGlobal;
-            arg = self.identifier_constant(name) as isize;
+            arg = self.resolve_upvalue(self.compilers.len()-1, name);
+            println!("resolve_upvalue {:?}: {}", name, arg);
+            if arg != -1 {
+                get_op = OpCode::GetUpValue;
+                set_op = OpCode::SetUpValue;
+            } else {
+                get_op = OpCode::GetGlobal;
+                set_op = OpCode::SetGlobal;
+                arg = self.identifier_constant(name) as isize;
+            }
         }
 
         if can_assign && self.match_token(TokenType::Equal) {
@@ -619,8 +655,8 @@ impl Parser {
         });
     }
 
-    fn resolve_local(&mut self, name: &Token) -> isize {
-        let compiler = self.compilers.last().unwrap();
+    fn resolve_local(&mut self, compiler_id: usize, name: &Token) -> isize {
+        let compiler = &self.compilers[compiler_id];
         for i in (0..compiler.locals.len()).rev() {
             if name.value == compiler.locals[i].name {
                 if compiler.locals[i].depth == -1 {
@@ -634,6 +670,28 @@ impl Parser {
             }
         }
         -1
+    }
+
+    fn resolve_upvalue(&mut self, compiler_id: usize, name: &Token) -> isize {
+        if compiler_id == 0 {
+            return -1;
+        }
+
+        let local = self.resolve_local(compiler_id-1, name);
+        if local != -1 {
+            return self.add_upvalue(compiler_id, local.try_into().unwrap(), true) as isize;
+        }
+
+        let upvalue = self.resolve_upvalue(compiler_id-1, name);
+        if upvalue != -1 {
+            return self.add_upvalue(compiler_id, upvalue.try_into().unwrap(), false) as isize;
+        }
+
+        return -1;
+    }
+
+    fn add_upvalue(&mut self, compiler_id: usize, index: u8, is_local: bool) -> usize {
+        self.compilers[compiler_id].add_upvalue( index, is_local)
     }
 
     fn define_variable(&mut self, global: u8) {
@@ -813,7 +871,7 @@ impl Parser {
         self.compilers.last_mut().unwrap().function.chunk_mut()
     }
 
-    fn end_compiler(&mut self) -> Value {
+    fn end_compiler(&mut self) -> Compiler {
         self.emit_return();
         if !*self.had_error.borrow() {
             let mut name = "<script>".to_owned();
@@ -829,7 +887,7 @@ impl Parser {
             #[cfg(debug_assertions)]
             self.current_chunk().disassemble(&name);
         }
-        self.compilers.pop().unwrap().function
+        self.compilers.pop().unwrap()
     }
 
     fn begin_scope(&mut self) {

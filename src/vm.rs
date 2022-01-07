@@ -344,6 +344,9 @@ impl VM {
             self.trace();
 
             match self.read_opcode()? {
+                OpCode::GetUpValue | OpCode::SetUpValue => {
+                    todo!()
+                },
                 OpCode::Jump => {
                     let offset = self.read_u16();
                     self.current_frame_mut().pc += offset as usize;
