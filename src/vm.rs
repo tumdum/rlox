@@ -1,7 +1,7 @@
 use crate::allocator::Allocator;
 use crate::chunk::InvalidOpCode;
 use crate::compiler::Parser;
-use crate::value::{Callable, Closure, NativeFunction, Obj, Value};
+use crate::value::{Callable, Closure, NativeFunction, ObjInner, Value};
 use crate::{Chunk, OpCode};
 use arrayvec::ArrayVec;
 use fxhash::FxHashMap;
@@ -111,6 +111,7 @@ pub struct VM {
     globals: FxHashMap<String, Value>,
     allocator: Rc<RefCell<Allocator>>,
     output: Rc<RefCell<dyn std::io::Write>>,
+    current_parser: Option<Parser>,
 }
 
 impl VM {
@@ -122,6 +123,7 @@ impl VM {
             globals: FxHashMap::default(),
             allocator: Rc::new(RefCell::new(Allocator::default())),
             output,
+            current_parser: None,
         }
     }
 
@@ -335,6 +337,9 @@ impl VM {
             #[cfg(debug_assertions)]
             self.trace();
 
+            #[cfg(any(debug_assert, feature = "always_gc"))]
+            self.collect_garbage();
+
             match self.read_opcode()? {
                 OpCode::GetUpValue => {
                     let slot = self.read_byte() as usize;
@@ -417,8 +422,8 @@ impl VM {
                         (Obj(l), Obj(r)) => unsafe {
                             let l = &**l;
                             let r = &**r;
-                            match (l, r) {
-                                (self::Obj::String(l), self::Obj::String(r)) => {
+                            match (&l.inner, &r.inner) {
+                                (ObjInner::String(l), ObjInner::String(r)) => {
                                     let tmp = format!("{}{}", l, r);
                                     self.allocator.borrow_mut().allocate_string(tmp)
                                 }
@@ -442,6 +447,7 @@ impl VM {
                         }
                     };
                     self.push(result);
+                    self.collect_garbage();
                 }
                 OpCode::Subtract => binary_op!(self, -),
                 OpCode::Multiply => binary_op!(self, *),
@@ -494,6 +500,7 @@ impl VM {
                     debug_assert!(closure.closure().unwrap().upvalues.len() == upvalue_count);
 
                     self.push(closure);
+                    self.collect_garbage();
                 }
                 OpCode::Nil => self.push(Value::Nil),
                 OpCode::True => self.push(true),
@@ -554,6 +561,36 @@ impl VM {
         }
     }
 
+    fn collect_garbage(&mut self) {
+        if !self.allocator.borrow().should_gc() {
+            return;
+        }
+        println!("== GC START == ");
+        self.mark_roots();
+        self.sweep();
+        println!("==  GC END  == ");
+    }
+
+    fn mark_roots(&mut self) {
+        self.stack.iter_mut().for_each(|v| v.mark());
+        self.frames.iter_mut().for_each(|v| v.closure.mark());
+        self.open_upvalues.iter_mut().for_each(|v| v.mark());
+        self.globals.values_mut().for_each(|v| v.mark());
+
+        self.mark_compiler_roots();
+    }
+
+    fn mark_compiler_roots(&mut self) {
+        self.current_parser
+            .as_mut()
+            .iter_mut()
+            .for_each(|p| p.mark());
+    }
+
+    fn sweep(&mut self) {
+        self.allocator.borrow_mut().sweep();
+    }
+
     pub fn repl(&mut self) -> Result<(), Error> {
         loop {
             print!("> ");
@@ -580,8 +617,8 @@ impl VM {
     }
 
     fn interpret(&mut self, source: &str) -> Result<(), Error> {
-        let parser = Parser::new(source, self.allocator.clone());
-        let function = if let Some(function) = parser.compile() {
+        self.current_parser = Some(Parser::new(source, self.allocator.clone()));
+        let function = if let Some(function) = self.current_parser.as_mut().unwrap().compile() {
             function
         } else {
             return Err(Error::CompilationFailed);
@@ -606,6 +643,7 @@ mod tests {
         ($input: expr, $expected: expr) => {{
             let output = Rc::new(RefCell::new(vec![]));
             let mut vm = VM::new(output.clone());
+            vm.register_bulitins();
             let got = vm.interpret(&format!("{}", $input));
             assert_matches!(got, Ok(_));
             let output = std::str::from_utf8(&output.borrow()).unwrap().to_owned();
@@ -840,12 +878,8 @@ print fact(11);"#,
     fn native_functions() {
         // TODO: use registered builtins
         let output = Rc::new(RefCell::new(vec![]));
-        let output_clone = output.clone();
         let mut vm = VM::new(output.clone());
-        vm.define_native("println", move |args| {
-            writeln!(output_clone.borrow_mut(), "{:?}", args).unwrap();
-            Value::Nil
-        });
+        vm.register_bulitins();
         let got = vm.interpret(
             r#"
 println(1,nil,"test");
@@ -863,10 +897,7 @@ println(fact(5));
         assert_matches!(got, Ok(_));
         let output = std::str::from_utf8(&output.borrow()).unwrap().to_owned();
         let output = output.trim();
-        assert_eq!(
-                output,
-                "[Number(1), Nil, Obj(String(\"test\"))]\n[Obj(Closure(<fn x@0>)), Number(13), Number(4)]\n[Number(2)]\n[Number(6)]\n[Number(24)]\n[Number(120)]\n[Number(120)]"
-            );
+        assert_eq!(output, "1 nil test\n<fn x@0> 13 4\n2\n6\n24\n120\n120");
     }
 
     #[test]
@@ -999,6 +1030,26 @@ globalOne();
 globalTwo();
         "#,
             "3\n3"
+        );
+        test_eval!(
+            r#"
+            fun counter(start, step) {
+                fun aux() {
+                    println(start);
+                    start = start + step;
+                }
+                return aux;
+            }
+            var a = counter(10,3);
+            var b = counter(1,7);
+            a();
+            b();
+            a();
+            b();
+            a();
+            b();
+            "#,
+            "10\n1\n13\n8\n16\n15"
         );
     }
 }

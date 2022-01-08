@@ -149,6 +149,10 @@ impl Compiler {
         }
     }
 
+    fn mark(&mut self) {
+        self.function.mark();
+    }
+
     fn add_upvalue(&mut self, index: u8, is_local: bool) -> usize {
         if let Some(idx) = self
             .upvalues
@@ -197,7 +201,11 @@ impl Parser {
         }
     }
 
-    pub fn compile(mut self) -> Option<Value> {
+    pub fn mark(&mut self) {
+        self.compilers.iter_mut().for_each(|c| c.mark());
+    }
+
+    pub fn compile(&mut self) -> Option<Value> {
         self.advance().unwrap();
 
         while !self.match_token(TokenType::Eof) {
@@ -879,7 +887,7 @@ impl Parser {
             let mut name = "<script>".to_owned();
             if let crate::value::Value::Obj(ptr) = self.compilers.last().unwrap().function {
                 let obj: &self::Obj = unsafe { &*ptr };
-                if let crate::value::Obj::Function(f) = obj {
+                if let crate::value::ObjInner::Function(f) = &**obj {
                     if !f.name.is_empty() {
                         name = f.name.clone()
                     }

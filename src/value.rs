@@ -2,6 +2,7 @@ use crate::chunk::Chunk;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use thiserror::Error;
 
@@ -14,6 +15,17 @@ pub enum Error {
 pub struct Closure {
     pub function: Value,
     pub upvalues: Vec<Value>,
+}
+
+impl Closure {
+    fn mark(&mut self) {
+        self.function.mark();
+        self.upvalues.iter_mut().for_each(|v| v.mark());
+    }
+
+    fn size(&self) -> usize {
+        0
+    }
 }
 
 impl Debug for Closure {
@@ -34,6 +46,14 @@ pub struct Function {
 impl Function {
     pub fn line(&self, pc: usize) -> Option<usize> {
         self.chunk.lines.get(pc).cloned()
+    }
+
+    fn mark(&mut self) {
+        self.chunk.mark();
+    }
+
+    fn size(&self) -> usize {
+        self.name.as_bytes().len() + self.chunk.size()
     }
 }
 
@@ -69,21 +89,93 @@ pub struct UpValue {
     pub closed: Option<Value>,
 }
 
+impl UpValue {
+    fn mark(&mut self) {
+        self.closed.as_mut().iter_mut().for_each(|c| c.mark());
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
-pub enum Obj {
+pub struct Obj {
+    pub inner: ObjInner,
+    pub is_marked: bool,
+}
+
+impl Obj {
+    fn mark(&mut self) {
+        #[cfg(debug_assertions)]
+        println!("marking {:p} => {:?}", self, self);
+        self.is_marked = true;
+        self.inner.mark();
+    }
+}
+
+impl Deref for Obj {
+    type Target = ObjInner;
+    fn deref(&self) -> &ObjInner {
+        &self.inner
+    }
+}
+
+impl DerefMut for Obj {
+    fn deref_mut(&mut self) -> &mut ObjInner {
+        &mut self.inner
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
+pub enum ObjInner {
     String(String),
     Function(Function),
     Closure(Closure),
     UpValue(UpValue),
 }
 
+impl ObjInner {
+    #[allow(dead_code)]
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::String(_) => "string",
+            Self::Function(_) => "function",
+            Self::Closure(_) => "closure",
+            Self::UpValue(_) => "upvalue",
+        }
+    }
+
+    fn mark(&mut self) {
+        match self {
+            ObjInner::String(_s) => {}
+            ObjInner::Function(function) => function.mark(),
+            ObjInner::Closure(closure) => closure.mark(),
+            ObjInner::UpValue(upvalue) => upvalue.mark(),
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + match self {
+                Self::String(s) => s.as_bytes().len(),
+                Self::Function(f) => f.size(),
+                Self::Closure(c) => c.size(),
+                Self::UpValue(_) => 0,
+            }
+    }
+}
+
+impl Drop for Obj {
+    fn drop(&mut self) {
+        #[cfg(feature = "alloc_logs")]
+        println!("deallocated {:p}: {}", self, self.type_name());
+    }
+}
+
 impl Display for Obj {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            Self::String(s) => write!(f, "{}", s),
-            Self::Function(function) => function.fmt(f),
-            Self::Closure(closure) => closure.function.function().unwrap().fmt(f),
-            Self::UpValue(_location) => todo!(),
+        match &**self {
+            ObjInner::String(s) => write!(f, "{}", s),
+            ObjInner::Function(function) => function.fmt(f),
+            ObjInner::Closure(closure) => closure.function.function().unwrap().fmt(f),
+            ObjInner::UpValue(_location) => todo!(),
         }
     }
 }
@@ -125,7 +217,7 @@ impl Value {
 
     pub fn string(&self) -> Option<&str> {
         if let Self::Obj(ptr) = self {
-            if let Obj::String(s) = unsafe { &**ptr } {
+            if let ObjInner::String(s) = &**unsafe { &**ptr } {
                 return Some(s);
             }
         }
@@ -135,8 +227,8 @@ impl Value {
     pub fn function_mut(&mut self) -> Option<&mut Function> {
         if let Value::Obj(ptr) = self {
             let obj: &mut Obj = unsafe { &mut **ptr };
-            if let Obj::Function(ref mut f) = obj {
-                return Some(&mut *f);
+            if let ObjInner::Function(ref mut f) = **obj {
+                return Some(f);
             }
         }
         None
@@ -145,8 +237,8 @@ impl Value {
     pub fn function(&self) -> Option<&Function> {
         if let Value::Obj(ptr) = self {
             let obj: &Obj = unsafe { &**ptr };
-            if let Obj::Function(f) = obj {
-                return Some(&*f);
+            if let ObjInner::Function(f) = &obj.inner {
+                return Some(f);
             }
         }
         None
@@ -155,8 +247,8 @@ impl Value {
     pub fn closure_mut(&mut self) -> Option<&mut Closure> {
         if let Value::Obj(ptr) = self {
             let obj: &mut Obj = unsafe { &mut **ptr };
-            if let Obj::Closure(ref mut f) = obj {
-                return Some(&mut *f);
+            if let ObjInner::Closure(ref mut f) = **obj {
+                return Some(f);
             }
         }
         None
@@ -164,8 +256,8 @@ impl Value {
     pub fn closure(&self) -> Option<&Closure> {
         if let Value::Obj(ptr) = self {
             let obj: &Obj = unsafe { &**ptr };
-            if let Obj::Closure(f) = obj {
-                return Some(&*f);
+            if let ObjInner::Closure(f) = &obj.inner {
+                return Some(f);
             }
         }
         None
@@ -173,8 +265,8 @@ impl Value {
     pub fn upvalue_mut(&mut self) -> Option<&mut UpValue> {
         if let Value::Obj(ptr) = self {
             let obj: &mut Obj = unsafe { &mut **ptr };
-            if let Obj::UpValue(ref mut v) = obj {
-                return Some(&mut *v);
+            if let ObjInner::UpValue(ref mut v) = &mut obj.inner {
+                return Some(v);
             }
         }
         None
@@ -182,8 +274,8 @@ impl Value {
     pub fn upvalue(&self) -> Option<&UpValue> {
         if let Value::Obj(ptr) = self {
             let obj: &Obj = unsafe { &**ptr };
-            if let Obj::UpValue(v) = obj {
-                return Some(&*v);
+            if let ObjInner::UpValue(v) = &**obj {
+                return Some(v);
             }
         }
         None
@@ -192,7 +284,7 @@ impl Value {
     pub fn chunk_mut(&mut self) -> &mut Chunk {
         if let Value::Obj(ptr) = self {
             let obj: &mut Obj = unsafe { &mut **ptr };
-            if let Obj::Function(f) = obj {
+            if let ObjInner::Function(f) = &mut **obj {
                 return &mut f.chunk;
             }
         }
@@ -202,12 +294,43 @@ impl Value {
     pub fn callable(&self) -> Option<Callable> {
         match self {
             Self::NativeFunction(nf) => Some(Callable::Native(nf)),
-            Self::Obj(ptr) => match unsafe { &**ptr } {
-                Obj::Function(f) => Some(Callable::Function(f)),
-                Obj::Closure(c) => Some(Callable::Closure(c)),
+            Self::Obj(ptr) => match &unsafe { &**ptr }.inner {
+                ObjInner::Function(f) => Some(Callable::Function(f)),
+                ObjInner::Closure(c) => Some(Callable::Closure(c)),
                 _ => None,
             },
             _ => None,
+        }
+    }
+
+    pub fn mark(&mut self) {
+        use Value::*;
+        match self {
+            Nil => {}
+            Number(_f) => {}
+            Boolean(_b) => {}
+            NativeFunction(_nf) => {}
+            Obj(ptr) => {
+                if !ptr.is_null() {
+                    let obj: &mut self::Obj = unsafe { &mut **ptr };
+                    if !obj.is_marked {
+                        obj.mark();
+                    }
+                }
+            }
+        }
+    }
+    pub fn is_reachable(&self) -> bool {
+        use Value::*;
+        match self {
+            Nil => true,
+            Number(_f) => true,
+            Boolean(_b) => true,
+            NativeFunction(_nf) => true,
+            Obj(ptr) => {
+                let obj: &mut self::Obj = unsafe { &mut **ptr };
+                obj.is_marked
+            }
         }
     }
 }
@@ -240,7 +363,7 @@ impl Debug for Value {
             Value::Boolean(b) => write!(f, "Boolean({})", b),
             Value::NativeFunction(nf) => write!(f, "NativeFunction({})", nf),
             Value::Obj(ptr) => {
-                write!(f, "Obj({:?})", unsafe { &**ptr })
+                write!(f, "Obj({:p} => {:?})", ptr, unsafe { &**ptr })
             }
         }
     }
