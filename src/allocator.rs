@@ -1,4 +1,4 @@
-use crate::value::{Closure, Function, Obj, ObjInner, UpValue, Value};
+use crate::value::{Class, Closure, Function, Obj, ObjInner, ObjInstance, UpValue, Value};
 use std::collections::HashSet;
 use std::mem::transmute;
 
@@ -79,6 +79,16 @@ impl Allocator {
             closed: None,
         });
         self.record_object(obj, false)
+    }
+
+    pub fn allocate_class(&mut self, name: String) -> Value {
+        let class = ObjInner::Class(Class { name });
+        self.record_object(class, false)
+    }
+
+    pub fn allocate_obj_instance(&mut self, class: Value) -> Value {
+        let obj_instance = ObjInner::ObjInstance(ObjInstance::new(class));
+        self.record_object(obj_instance, false)
     }
 
     fn record_object(&mut self, obj: ObjInner, intern: bool) -> Value {

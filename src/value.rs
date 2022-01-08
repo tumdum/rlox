@@ -124,11 +124,56 @@ impl DerefMut for Obj {
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
+pub struct Class {
+    pub name: String,
+}
+
+impl Class {
+    fn mark(&mut self) {
+        todo!()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
+pub struct ObjInstance {
+    pub class: Value,
+    // fields: FxHashMap<String, Value>, TODO: make it a hash map/faster/hashable
+    fields: std::collections::BTreeMap<String, Value>,
+}
+
+impl ObjInstance {
+    pub fn new(class: Value) -> ObjInstance {
+        Self {
+            class,
+            fields: Default::default(),
+        }
+    }
+    fn mark(&mut self) {
+        self.class.mark();
+        self.fields.values_mut().for_each(|v| v.mark());
+    }
+
+    pub fn get_field(&self, name: &str) -> Option<&Value> {
+        self.fields.get(name)
+    }
+
+    pub fn set_field(&mut self, name: String, value: Value) {
+        self.fields.insert(name, value);
+    }
+
+    fn size(&self) -> usize {
+        self.fields.keys().map(|k| k.as_bytes().len()).sum()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub enum ObjInner {
     String(String),
     Function(Function),
     Closure(Closure),
     UpValue(UpValue),
+    Class(Class),
+    ObjInstance(ObjInstance),
 }
 
 impl ObjInner {
@@ -139,15 +184,19 @@ impl ObjInner {
             Self::Function(_) => "function",
             Self::Closure(_) => "closure",
             Self::UpValue(_) => "upvalue",
+            Self::Class(_) => "class",
+            Self::ObjInstance(_) => "instance",
         }
     }
 
     fn mark(&mut self) {
         match self {
-            ObjInner::String(_s) => {}
-            ObjInner::Function(function) => function.mark(),
-            ObjInner::Closure(closure) => closure.mark(),
-            ObjInner::UpValue(upvalue) => upvalue.mark(),
+            Self::String(_s) => {}
+            Self::Function(function) => function.mark(),
+            Self::Closure(closure) => closure.mark(),
+            Self::UpValue(upvalue) => upvalue.mark(),
+            Self::Class(class) => class.mark(),
+            Self::ObjInstance(instance) => instance.mark(),
         }
     }
 
@@ -158,6 +207,8 @@ impl ObjInner {
                 Self::Function(f) => f.size(),
                 Self::Closure(c) => c.size(),
                 Self::UpValue(_) => 0,
+                Self::Class(_) => 0, // TODO
+                Self::ObjInstance(instance) => instance.size(),
             }
     }
 }
@@ -176,6 +227,8 @@ impl Display for Obj {
             ObjInner::Function(function) => function.fmt(f),
             ObjInner::Closure(closure) => closure.function.function().unwrap().fmt(f),
             ObjInner::UpValue(_location) => todo!(),
+            ObjInner::Class(class) => write!(f, "class {}", class.name),
+            ObjInner::ObjInstance(instance) => write!(f, "{} instance", instance.class),
         }
     }
 }
@@ -281,6 +334,26 @@ impl Value {
         None
     }
 
+    pub fn instance_mut(&mut self) -> Option<&mut ObjInstance> {
+        if let Value::Obj(ptr) = self {
+            let obj: &mut Obj = unsafe { &mut **ptr };
+            if let ObjInner::ObjInstance(ref mut v) = &mut obj.inner {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+    pub fn instance(&self) -> Option<&ObjInstance> {
+        if let Value::Obj(ptr) = self {
+            let obj: &Obj = unsafe { &**ptr };
+            if let ObjInner::ObjInstance(i) = &obj.inner {
+                return Some(i);
+            }
+        }
+        None
+    }
+
     pub fn chunk_mut(&mut self) -> &mut Chunk {
         if let Value::Obj(ptr) = self {
             let obj: &mut Obj = unsafe { &mut **ptr };
@@ -297,6 +370,7 @@ impl Value {
             Self::Obj(ptr) => match &unsafe { &**ptr }.inner {
                 ObjInner::Function(f) => Some(Callable::Function(f)),
                 ObjInner::Closure(c) => Some(Callable::Closure(c)),
+                ObjInner::Class(c) => Some(Callable::Class(c)),
                 _ => None,
             },
             _ => None,
@@ -320,6 +394,20 @@ impl Value {
             }
         }
     }
+    pub fn type_name(&self) -> &'static str {
+        use Value::*;
+        match self {
+            Nil => "nil",
+            Number(_f) => "number",
+            Boolean(_b) => "boolean",
+            NativeFunction(_nf) => "native_function",
+            Obj(ptr) => {
+                let obj: &self::Obj = unsafe { &**ptr };
+                obj.type_name()
+            }
+        }
+    }
+
     pub fn is_reachable(&self) -> bool {
         use Value::*;
         match self {
@@ -339,6 +427,7 @@ pub enum Callable<'a> {
     Function(&'a Function),
     Closure(&'a Closure),
     Native(&'a NativeFunction),
+    Class(&'a Class),
 }
 
 impl Display for Value {

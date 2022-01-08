@@ -53,6 +53,10 @@ pub enum RuntimeProblem {
     InvalidNumberOfArguments { expected: usize, passed: usize },
     #[error("Maximum call stack depth reached {MAX_CALL_STACK_DEPTH}")]
     MaxCallStackDepthReached,
+    #[error("Undefined property '{0}'")]
+    UndefinedProperty(String),
+    #[error("Only instances have fields, tried access fields of {0}")]
+    InvalidPropertyAccess(String),
 }
 
 #[derive(Debug, Error)]
@@ -202,6 +206,10 @@ impl VM {
             .constants[constant_index]
     }
 
+    fn read_string(&mut self) -> &str {
+        self.read_constant().string().unwrap()
+    }
+
     fn read_u16(&mut self) -> u16 {
         let pc = self.current_frame().pc;
         let chunk: &Chunk = &self
@@ -277,6 +285,12 @@ impl VM {
                     );
                 }
                 self.call(callee, arg_count)
+            }
+            Some(Callable::Class(_class)) => {
+                let instance = self.allocator.borrow_mut().allocate_obj_instance(callee);
+                let l = self.stack.len();
+                self.stack[l - arg_count as usize - 1] = instance;
+                Ok(())
             }
             None => Err(self.new_runtime_error(RuntimeProblem::CallToNonCallableValue(callee))),
         }
@@ -519,7 +533,7 @@ impl VM {
                     self.stack[slot_offset + slot] = self.stack.last().unwrap().clone();
                 }
                 OpCode::GetGlobal => {
-                    let name = self.read_constant().string().unwrap().to_owned(); // TODO
+                    let name = self.read_string().to_owned();
                     match self.globals.entry(name) {
                         Occupied(e) => {
                             let value = e.get().clone();
@@ -533,13 +547,13 @@ impl VM {
                     }
                 }
                 OpCode::DefineGlobal => {
-                    let name = self.read_constant().string().unwrap().to_owned(); // TODO
+                    let name = self.read_string().to_owned();
                     let value = self.stack.last().unwrap().clone();
                     self.globals.insert(name, value);
                     self.pop()?;
                 }
                 OpCode::SetGlobal => {
-                    let name = self.read_constant().string().unwrap().to_owned(); // TODO
+                    let name = self.read_string().to_owned();
                     let value = self.stack.last().unwrap().clone();
                     match self.globals.entry(name) {
                         Occupied(mut e) => {
@@ -552,10 +566,58 @@ impl VM {
                         }
                     }
                 }
+                OpCode::GetProperty => {
+                    let instance = self.peek(0)?;
+                    let instance = match instance.instance() {
+                        Some(i) => i,
+                        None => {
+                            return Err(self.new_runtime_error(
+                                RuntimeProblem::InvalidPropertyAccess(
+                                    instance.type_name().to_owned(),
+                                ),
+                            ))
+                        }
+                    };
+                    let name = self.read_string().to_owned();
+                    match instance.get_field(&name) {
+                        Some(v) => {
+                            self.pop()?;
+                            self.push(v.clone());
+                        }
+                        None => {
+                            return Err(
+                                self.new_runtime_error(RuntimeProblem::UndefinedProperty(name))
+                            );
+                        }
+                    }
+                }
+                OpCode::SetProperty => {
+                    let value = self.pop()?;
+                    let mut instance = self.pop()?;
+                    let instance = match instance.instance_mut() {
+                        Some(i) => i,
+                        None => {
+                            return Err(self.new_runtime_error(
+                                RuntimeProblem::InvalidPropertyAccess(
+                                    instance.type_name().to_owned(),
+                                ),
+                            ))
+                        }
+                    };
+                    let field = self.read_string();
+                    instance.set_field(field.to_owned(), value.clone());
+                    self.push(value);
+                }
                 OpCode::Equal => {
                     let b = self.pop()?;
                     let a = self.pop()?;
                     self.push(a == b);
+                }
+                OpCode::Class => {
+                    let class_name = self.read_constant().string().unwrap().to_owned();
+                    let class = self.allocator.borrow_mut().allocate_class(class_name);
+                    self.push(class);
+                    self.collect_garbage();
                 }
             }
         }
@@ -591,8 +653,13 @@ impl VM {
         self.allocator.borrow_mut().sweep();
     }
 
+    fn clear_stack(&mut self) {
+        self.stack.clear();
+    }
+
     pub fn repl(&mut self) -> Result<(), Error> {
         loop {
+            self.clear_stack();
             print!("> ");
             std::io::stdout().flush()?;
             let mut line = String::new();
@@ -1050,6 +1117,29 @@ globalTwo();
             b();
             "#,
             "10\n1\n13\n8\n16\n15"
+        );
+    }
+
+    #[test]
+    fn classes() {
+        test_eval!("class Foo {} print Foo;", "class Foo");
+        test_eval!("class Foo {} print Foo();", "class Foo instance");
+        test_eval!(
+            r#"
+        class Toast {}
+        var toast = Toast();
+        print toast.jam = "grape";"#,
+            "grape"
+        );
+        test_eval!(
+            r#"
+        class Pair {}
+
+        var pair = Pair();
+        pair.first = 1;
+        pair.second = 2;
+        print pair.first + pair.second;"#,
+            "3"
         );
     }
 }

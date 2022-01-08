@@ -17,7 +17,7 @@ static RULES: Lazy<HashMap<TokenType, ParseRule>> = Lazy::new(|| {
        TokenType::LeftBrace      => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::RightBrace     => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Comma          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::Dot            => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
+       TokenType::Dot            => ParseRule{prefix: None,                    infix: Some(&Parser::dot),    precedence: Precedence::Call},
        TokenType::Minus          => ParseRule{prefix: Some(&Parser::unary),    infix: Some(&Parser::binary), precedence: Precedence::Term},
        TokenType::Plus           => ParseRule{prefix: None,                    infix: Some(&Parser::binary), precedence: Precedence::Term},
        TokenType::Semicolon      => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
@@ -375,6 +375,19 @@ impl Parser {
         }
     }
 
+    fn class_declaration(&mut self) {
+        self.consume(TokenType::Identifier, "Expected class name");
+        let name = self.previous.as_ref().unwrap().clone();
+        let name_constant = self.identifier_constant(&name);
+        self.declare_variable();
+
+        self.emit_bytes(OpCode::Class as u8, name_constant);
+        self.define_variable(name_constant);
+
+        self.consume(TokenType::LeftBrace, "Expected '{' before class body");
+        self.consume(TokenType::RightBrace, "Expected '}' after class body");
+    }
+
     fn var_declaration(&mut self) {
         let global = self.parse_variable("Expect variable name");
         if self.match_token(TokenType::Equal) {
@@ -427,7 +440,9 @@ impl Parser {
     }
 
     fn declaration(&mut self) {
-        if self.match_token(TokenType::Fun) {
+        if self.match_token(TokenType::Class) {
+            self.class_declaration();
+        } else if self.match_token(TokenType::Fun) {
             self.fun_declaration();
         } else if self.match_token(TokenType::Var) {
             self.var_declaration();
@@ -566,6 +581,18 @@ impl Parser {
     fn call(&mut self, _can_assign: bool) {
         let arg_count = self.argument_list();
         self.emit_bytes(OpCode::Call as u8, arg_count);
+    }
+
+    fn dot(&mut self, can_assign: bool) {
+        self.consume(TokenType::Identifier, "Expected property name after '.'");
+        let name = self.identifier_constant(self.previous.clone().as_ref().unwrap());
+
+        if can_assign && self.match_token(TokenType::Equal) {
+            self.expression();
+            self.emit_bytes(OpCode::SetProperty as u8, name);
+        } else {
+            self.emit_bytes(OpCode::GetProperty as u8, name);
+        }
     }
 
     fn literal(&mut self, _can_assign: bool) {
