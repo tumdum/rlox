@@ -316,30 +316,24 @@ impl Parser {
     fn function(&mut self, function_type: FunctionType) {
         let compilers = self.compilers.len();
         self.compilers.push(Compiler::new(self.allocator.clone()));
-        self.compilers
-            .last_mut()
-            .unwrap()
+        self.current_compiler_mut()
             .function
             .function_mut()
             .unwrap()
             .name = self.previous.as_ref().unwrap().value.clone();
-        self.compilers.last_mut().unwrap().function_type = function_type;
+        self.current_compiler_mut().function_type = function_type;
 
         self.begin_scope();
         self.consume(TokenType::LeftParen, "Expect '(' after function name");
         if !self.check(TokenType::RightParen) {
             loop {
-                self.compilers
-                    .last_mut()
-                    .unwrap()
+                self.current_compiler_mut()
                     .function
                     .function_mut()
                     .unwrap()
                     .arity += 1;
                 if self
-                    .compilers
-                    .last()
-                    .unwrap()
+                    .current_compiler_mut()
                     .function
                     .function()
                     .unwrap()
@@ -375,6 +369,16 @@ impl Parser {
         }
     }
 
+    fn method(&mut self) {
+        self.consume(TokenType::Identifier, "Expected method name");
+        let name = self.previous.as_ref().unwrap().clone();
+        let constant = self.identifier_constant(&name);
+
+        let function_type = FunctionType::Function;
+        self.function(function_type);
+        self.emit_bytes(OpCode::Method as u8, constant);
+    }
+
     fn class_declaration(&mut self) {
         self.consume(TokenType::Identifier, "Expected class name");
         let name = self.previous.as_ref().unwrap().clone();
@@ -384,8 +388,13 @@ impl Parser {
         self.emit_bytes(OpCode::Class as u8, name_constant);
         self.define_variable(name_constant);
 
+        self.named_variable(&name, false);
         self.consume(TokenType::LeftBrace, "Expected '{' before class body");
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
+            self.method();
+        }
         self.consume(TokenType::RightBrace, "Expected '}' after class body");
+        self.emit_byte(OpCode::Pop as u8);
     }
 
     fn var_declaration(&mut self) {
@@ -411,7 +420,7 @@ impl Parser {
     }
 
     fn return_statement(&mut self) {
-        if self.compilers.last().unwrap().function_type == FunctionType::Script {
+        if self.current_compiler().function_type == FunctionType::Script {
             self.error(self.scanner.line(), "Can't return from top level".into());
         }
 
@@ -639,7 +648,7 @@ impl Parser {
         self.consume(TokenType::Identifier, msg);
 
         self.declare_variable();
-        if self.compilers.last().unwrap().scope_depth > 0 {
+        if self.current_compiler().scope_depth > 0 {
             return 0;
         }
         self.identifier_constant(self.previous.clone().as_ref().unwrap())
@@ -654,13 +663,13 @@ impl Parser {
     }
 
     fn declare_variable(&mut self) {
-        if self.compilers.last().unwrap().scope_depth == 0 {
+        if self.current_compiler().scope_depth == 0 {
             return;
         }
 
         let token = self.previous.as_ref().unwrap().clone();
 
-        let compiler = self.compilers.last().unwrap();
+        let compiler = self.current_compiler();
         for Local { name, depth, .. } in compiler.locals.iter().rev() {
             if *depth != -1 && *depth < compiler.scope_depth {
                 break;
@@ -678,14 +687,14 @@ impl Parser {
     }
 
     fn add_local(&mut self, name: Token) {
-        if self.compilers.last().unwrap().locals.len() == u8::max_value() as usize {
+        if self.current_compiler().locals.len() == u8::max_value() as usize {
             self.error(
                 self.scanner.line(),
                 "Too many local variables in scope".into(),
             );
             return;
         }
-        self.compilers.last_mut().unwrap().locals.push(Local {
+        self.current_compiler_mut().locals.push(Local {
             name: name.value,
             depth: -1,
             is_captured: false,
@@ -732,7 +741,7 @@ impl Parser {
     }
 
     fn define_variable(&mut self, global: u8) {
-        if self.compilers.last().unwrap().scope_depth > 0 {
+        if self.current_compiler().scope_depth > 0 {
             self.mark_initialized();
             return;
         }
@@ -783,17 +792,11 @@ impl Parser {
     }
 
     fn mark_initialized(&mut self) {
-        if self.compilers.last().unwrap().scope_depth == 0 {
+        if self.current_compiler().scope_depth == 0 {
             return;
         }
-        let scope_depth = self.compilers.last().unwrap().scope_depth;
-        self.compilers
-            .last_mut()
-            .unwrap()
-            .locals
-            .last_mut()
-            .unwrap()
-            .depth = scope_depth;
+        let scope_depth = self.current_compiler().scope_depth;
+        self.current_compiler_mut().locals.last_mut().unwrap().depth = scope_depth;
     }
 
     fn get_rule(&self, operator_type: TokenType) -> ParseRule {
@@ -905,14 +908,22 @@ impl Parser {
     }
 
     fn current_chunk(&mut self) -> &mut Chunk {
-        self.compilers.last_mut().unwrap().function.chunk_mut()
+        self.current_compiler_mut().function.chunk_mut()
+    }
+
+    fn current_compiler(&self) -> &Compiler {
+        self.compilers.last().unwrap()
+    }
+
+    fn current_compiler_mut(&mut self) -> &mut Compiler {
+        self.compilers.last_mut().unwrap()
     }
 
     fn end_compiler(&mut self) -> Compiler {
         self.emit_return();
         if !*self.had_error.borrow() {
             let mut name = "<script>".to_owned();
-            if let crate::value::Value::Obj(ptr) = self.compilers.last().unwrap().function {
+            if let crate::value::Value::Obj(ptr) = self.current_compiler().function {
                 let obj: &self::Obj = unsafe { &*ptr };
                 if let crate::value::ObjInner::Function(f) = &**obj {
                     if !f.name.is_empty() {
@@ -928,27 +939,18 @@ impl Parser {
     }
 
     fn begin_scope(&mut self) {
-        self.compilers.last_mut().unwrap().scope_depth += 1;
+        self.current_compiler_mut().scope_depth += 1;
     }
 
     fn end_scope(&mut self) {
-        self.compilers.last_mut().unwrap().scope_depth -= 1;
+        self.current_compiler_mut().scope_depth -= 1;
 
-        while !self.compilers.last_mut().unwrap().locals.is_empty()
-            && self
-                .compilers
-                .last_mut()
-                .unwrap()
-                .locals
-                .last()
-                .unwrap()
-                .depth
-                > self.compilers.last_mut().unwrap().scope_depth
+        while !self.current_compiler_mut().locals.is_empty()
+            && self.current_compiler_mut().locals.last().unwrap().depth
+                > self.current_compiler_mut().scope_depth
         {
             if self
-                .compilers
-                .last_mut()
-                .unwrap()
+                .current_compiler_mut()
                 .locals
                 .last()
                 .unwrap()
@@ -958,7 +960,7 @@ impl Parser {
             } else {
                 self.emit_byte(OpCode::Pop as u8);
             }
-            self.compilers.last_mut().unwrap().locals.pop();
+            self.current_compiler_mut().locals.pop();
         }
     }
 

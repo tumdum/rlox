@@ -126,11 +126,27 @@ impl DerefMut for Obj {
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub struct Class {
     pub name: String,
+    methods: std::collections::BTreeMap<String, Value>,
 }
 
 impl Class {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            methods: Default::default(),
+        }
+    }
+
+    pub fn get_method(&self, name: &str) -> Option<&Value> {
+        self.methods.get(name)
+    }
+
+    pub fn add_method(&mut self, name: &str, closure: Value) {
+        self.methods.insert(name.to_owned(), closure);
+    }
+
     fn mark(&mut self) {
-        todo!()
+        self.methods.values_mut().for_each(|m| m.mark());
     }
 }
 
@@ -167,6 +183,19 @@ impl ObjInstance {
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
+pub struct BoundMethod {
+    pub receiver: Value,
+    pub method: Value,
+}
+
+impl BoundMethod {
+    fn mark(&mut self) {
+        self.receiver.mark();
+        self.method.mark();
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub enum ObjInner {
     String(String),
     Function(Function),
@@ -174,6 +203,7 @@ pub enum ObjInner {
     UpValue(UpValue),
     Class(Class),
     ObjInstance(ObjInstance),
+    BoundMethod(BoundMethod),
 }
 
 impl ObjInner {
@@ -186,6 +216,7 @@ impl ObjInner {
             Self::UpValue(_) => "upvalue",
             Self::Class(_) => "class",
             Self::ObjInstance(_) => "instance",
+            Self::BoundMethod(_) => "bound_method",
         }
     }
 
@@ -197,6 +228,7 @@ impl ObjInner {
             Self::UpValue(upvalue) => upvalue.mark(),
             Self::Class(class) => class.mark(),
             Self::ObjInstance(instance) => instance.mark(),
+            Self::BoundMethod(bound_method) => bound_method.mark(),
         }
     }
 
@@ -209,6 +241,7 @@ impl ObjInner {
                 Self::UpValue(_) => 0,
                 Self::Class(_) => 0, // TODO
                 Self::ObjInstance(instance) => instance.size(),
+                Self::BoundMethod(_) => 0,
             }
     }
 }
@@ -229,6 +262,23 @@ impl Display for Obj {
             ObjInner::UpValue(_location) => todo!(),
             ObjInner::Class(class) => write!(f, "class {}", class.name),
             ObjInner::ObjInstance(instance) => write!(f, "{} instance", instance.class),
+            ObjInner::BoundMethod(bound_method) => {
+                let class = &bound_method
+                    .receiver
+                    .instance()
+                    .unwrap()
+                    .class
+                    .class()
+                    .unwrap();
+                let fun = bound_method
+                    .method
+                    .closure()
+                    .unwrap()
+                    .function
+                    .function()
+                    .unwrap();
+                write!(f, "<fn {}::{}@{}>", class.name, fun.name, fun.arity)
+            }
         }
     }
 }
@@ -334,6 +384,26 @@ impl Value {
         None
     }
 
+    pub fn class_mut(&mut self) -> Option<&mut Class> {
+        if let Value::Obj(ptr) = self {
+            let obj: &mut Obj = unsafe { &mut **ptr };
+            if let ObjInner::Class(ref mut c) = &mut obj.inner {
+                return Some(c);
+            }
+        }
+        None
+    }
+
+    pub fn class(&self) -> Option<&Class> {
+        if let Value::Obj(ptr) = self {
+            let obj: &Obj = unsafe { &**ptr };
+            if let ObjInner::Class(c) = &**obj {
+                return Some(c);
+            }
+        }
+        None
+    }
+
     pub fn instance_mut(&mut self) -> Option<&mut ObjInstance> {
         if let Value::Obj(ptr) = self {
             let obj: &mut Obj = unsafe { &mut **ptr };
@@ -371,6 +441,7 @@ impl Value {
                 ObjInner::Function(f) => Some(Callable::Function(f)),
                 ObjInner::Closure(c) => Some(Callable::Closure(c)),
                 ObjInner::Class(c) => Some(Callable::Class(c)),
+                ObjInner::BoundMethod(bm) => Some(Callable::BoundMethod(bm)),
                 _ => None,
             },
             _ => None,
@@ -428,6 +499,7 @@ pub enum Callable<'a> {
     Closure(&'a Closure),
     Native(&'a NativeFunction),
     Class(&'a Class),
+    BoundMethod(&'a BoundMethod),
 }
 
 impl Display for Value {

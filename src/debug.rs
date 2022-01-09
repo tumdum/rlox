@@ -73,6 +73,7 @@ impl Chunk {
             Ok(OpCode::CloseUpValue) => simple_instruction("OP_CLOSE_UPVALUE", offset),
             Ok(OpCode::Return) => simple_instruction("OP_RETURN", offset),
             Ok(OpCode::Class) => self.constant_instruction("OP_CLASS", offset),
+            Ok(OpCode::Method) => self.constant_instruction("OP_METHOD", offset),
             _other => {
                 println!("Unknown opcode {}", instruction);
                 offset + 1

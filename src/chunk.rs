@@ -69,6 +69,7 @@ pub enum OpCode {
     CloseUpValue = 29,
     Return = 30,
     Class = 31,
+    Method = 32,
 }
 
 #[derive(Debug, Error)]
@@ -112,6 +113,7 @@ impl TryFrom<u8> for OpCode {
             29 => Ok(OpCode::CloseUpValue),
             30 => Ok(OpCode::Return),
             31 => Ok(OpCode::Class),
+            32 => Ok(OpCode::Method),
             other => Err(InvalidOpCode(other)),
         }
     }

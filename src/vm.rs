@@ -292,8 +292,31 @@ impl VM {
                 self.stack[l - arg_count as usize - 1] = instance;
                 Ok(())
             }
+            Some(Callable::BoundMethod(bm)) => self.call(bm.method.clone(), arg_count),
             None => Err(self.new_runtime_error(RuntimeProblem::CallToNonCallableValue(callee))),
         }
+    }
+
+    fn bind_method(&mut self, class: &Value, name: &str) -> Result<(), Error> {
+        let method = match class.class().unwrap().get_method(name) {
+            Some(method) => method.clone(),
+            None => {
+                return Err(
+                    self.new_runtime_error(RuntimeProblem::UndefinedProperty(name.to_owned()))
+                )
+            }
+        };
+
+        let receiver = self.peek(0)?;
+
+        let bound = self
+            .allocator
+            .borrow_mut()
+            .allocate_bound_method(receiver, method);
+
+        self.pop()?;
+        self.push(bound);
+        Ok(())
     }
 
     fn capture_upvalue(&mut self, stack_index: usize) -> Value {
@@ -322,6 +345,15 @@ impl VM {
             }
         }
         self.open_upvalues = tmp;
+    }
+
+    fn define_method(&mut self, method_name: &str) -> Result<(), Error> {
+        let method = self.peek(0)?;
+        let mut class = self.peek(1)?;
+        let class = class.class_mut().unwrap();
+        class.add_method(method_name, method);
+
+        Ok(())
     }
 
     fn define_native(&mut self, name: &str, f: impl Fn(&[Value]) -> Value + 'static) {
@@ -406,7 +438,7 @@ impl VM {
                     }
                     let frame = frame.unwrap();
                     let frame_stack_start = frame.slots_offset - 1;
-                    debug_assert!(self.stack[frame_stack_start].closure().is_some());
+                    debug_assert!(self.stack[frame_stack_start].callable().is_some());
                     let returning_closure: *mut Value = &mut self.stack[frame_stack_start];
                     self.close_upvalues(returning_closure);
                     self.stack.drain(frame_stack_start..);
@@ -585,9 +617,7 @@ impl VM {
                             self.push(v.clone());
                         }
                         None => {
-                            return Err(
-                                self.new_runtime_error(RuntimeProblem::UndefinedProperty(name))
-                            );
+                            self.bind_method(&instance.class, &name)?;
                         }
                     }
                 }
@@ -619,11 +649,16 @@ impl VM {
                     self.push(class);
                     self.collect_garbage();
                 }
+                OpCode::Method => {
+                    let method = self.read_string().to_owned();
+                    self.define_method(&method)?;
+                }
             }
         }
     }
 
     fn collect_garbage(&mut self) {
+        #[cfg(not(feature = "always_gc"))]
         if !self.allocator.borrow().should_gc() {
             return;
         }
@@ -1140,6 +1175,34 @@ globalTwo();
         pair.second = 2;
         print pair.first + pair.second;"#,
             "3"
+        );
+    }
+
+    #[test]
+    fn methods() {
+        test_eval!(
+            r#"
+class Brunch {
+    eggs() {}
+}
+
+var brunch = Brunch();
+var eggs = brunch.eggs;
+println(eggs);"#,
+            "<fn Brunch::eggs@0>"
+        );
+        test_eval!(
+            r#"
+class Scone {
+      topping(first, second) {
+              print "scone with " + first + " and " + second;
+                }
+}
+
+var scone = Scone();
+scone.topping("berries", "cream");
+        "#,
+            "scone with berries and cream"
         );
     }
 }
