@@ -14,6 +14,7 @@ use thiserror::Error;
 
 const MAX_CALL_STACK_DEPTH: usize = 1000;
 const MAX_STACK_SIZE: usize = 256;
+pub const INITIALIZER_NAME: &str = "init";
 
 macro_rules! binary_op {
     ($target: expr, $op: tt) => {{
@@ -57,6 +58,8 @@ pub enum RuntimeProblem {
     UndefinedProperty(String),
     #[error("Only instances have fields, tried access fields of {0}")]
     InvalidPropertyAccess(String),
+    #[error("Class {0} which has no initializer called with {1} parameters")]
+    DefaultInitializerWithParameters(String, usize),
 }
 
 #[derive(Debug, Error)]
@@ -289,10 +292,23 @@ impl VM {
                 }
                 self.call(callee, arg_count)
             }
-            Some(Callable::Class(_class)) => {
-                let instance = self.allocator.borrow_mut().allocate_obj_instance(callee);
+            Some(Callable::Class(class)) => {
+                let instance = self
+                    .allocator
+                    .borrow_mut()
+                    .allocate_obj_instance(callee.clone());
                 let l = self.stack.len();
                 self.stack[l - arg_count as usize - 1] = instance;
+                if let Some(initializer) = class.get_method(INITIALIZER_NAME) {
+                    return self.call_value(initializer.clone(), arg_count);
+                } else if arg_count != 0 {
+                    return Err(self.new_runtime_error(
+                        RuntimeProblem::DefaultInitializerWithParameters(
+                            class.name.clone(),
+                            arg_count as usize,
+                        ),
+                    ));
+                }
                 Ok(())
             }
             Some(Callable::BoundMethod(bm)) => {
@@ -357,7 +373,6 @@ impl VM {
     fn define_method(&mut self, method_name: &str) -> Result<(), Error> {
         let method = self.peek(0)?;
         let mut class = self.peek(1)?;
-        dbg!(&method, &class);
         let class = class.class_mut().unwrap();
         class.add_method(method_name, method);
         self.pop()?;
@@ -379,11 +394,10 @@ impl VM {
         if self.frames.len() > MAX_CALL_STACK_DEPTH {
             return Err(self.new_runtime_error(RuntimeProblem::MaxCallStackDepthReached));
         }
-        // dbg!(&self.stack[self.stack.len() - arg_count as usize]);
-        self.frames.push(dbg!(CallFrame::new(
+        self.frames.push(CallFrame::new(
             function,
             self.stack.len() - arg_count as usize,
-        )));
+        ));
 
         Ok(())
     }
@@ -1257,6 +1271,50 @@ Nested().method();"#,
        method();
        "#,
             "Jane\nFoo\nBar\nBar\nQuux"
+        );
+    }
+
+    #[test]
+    fn initializers() {
+        test_eval!(
+            r#"
+        class Point {
+            init(x, y) {
+                this.x = x;
+                this.y = y;
+            }
+
+            dist() {
+                return this.x + this.y;
+            }
+        }
+        var p = Point(1,100);
+        print p.dist();
+        "#,
+            "101"
+        );
+    }
+
+    #[test]
+    fn full_object() {
+        test_eval!(
+            r#"
+class CoffeeMaker {
+  init(coffee) {
+    this.coffee = coffee;
+  }
+
+  brew() {
+    print "Enjoy your cup of " + this.coffee;
+
+    // No reusing the grounds!
+    this.coffee = nil;
+  }
+}
+
+var maker = CoffeeMaker("coffee and chicory");
+maker.brew();"#,
+            "Enjoy your cup of coffee and chicory"
         );
     }
 }

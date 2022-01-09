@@ -1,0 +1,32 @@
+class Fib {
+    fib(n) {
+        if (n == 1) {
+            return 0;
+        }
+        if (n == 2) {
+            return 1;
+        }
+        return this.fib(n-1) + this.fib(n-2);
+    }
+}
+
+fun test() {
+    fun fib10() {
+        return Fib().fib(10);
+    }
+    return fib10;
+}
+
+var x = test();
+var y = test();
+println("x which is fib(10)", x());
+println("y which is fib(10)", y());
+println("x == y?", x == y, x, y);
+
+for (var a = 1; a < 35; a = a + 1) {
+    var start = time();
+    var value = Fib().fib(a);
+    var duration = time() - start;
+    println("fib of", a, "is", value, "computed in", duration, "seconds");
+}
+

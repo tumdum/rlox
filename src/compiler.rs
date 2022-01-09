@@ -110,6 +110,7 @@ pub enum Error {
 #[derive(Debug, PartialEq, Eq)]
 enum FunctionType {
     Function,
+    Initializer,
     Method,
     Script,
 }
@@ -382,7 +383,12 @@ impl Parser {
         let name = self.previous.as_ref().unwrap().clone();
         let constant = self.identifier_constant(&name);
 
-        let function_type = FunctionType::Method;
+        let function_type = if self.previous.as_ref().unwrap().value == crate::vm::INITIALIZER_NAME
+        {
+            FunctionType::Initializer
+        } else {
+            FunctionType::Method
+        };
         self.function(function_type);
         self.emit_bytes(OpCode::Method as u8, constant);
     }
@@ -439,6 +445,12 @@ impl Parser {
         if self.match_token(TokenType::Semicolon) {
             self.emit_return();
         } else {
+            if self.current_compiler().function_type == FunctionType::Initializer {
+                self.error(
+                    self.scanner.line(),
+                    "Can't return a value from an initializer".into(),
+                );
+            }
             self.expression();
             self.consume(TokenType::Semicolon, "Expect ';' after return value");
             self.emit_byte(OpCode::Return as u8);
@@ -987,7 +999,11 @@ impl Parser {
     }
 
     fn emit_return(&mut self) {
-        self.emit_byte(OpCode::Nil as u8);
+        if self.current_compiler().function_type == FunctionType::Initializer {
+            self.emit_bytes(OpCode::GetLocal as u8, 0);
+        } else {
+            self.emit_byte(OpCode::Nil as u8);
+        }
         self.emit_byte(OpCode::Return as u8);
     }
 
