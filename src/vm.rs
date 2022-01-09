@@ -225,7 +225,10 @@ impl VM {
     }
 
     fn trace(&self) {
-        println!("     stack: {:?}", self.stack);
+        println!("     stack: {:?}", self.stack.len());
+        for v in &self.stack {
+            println!("            {:?}", v);
+        }
         println!("   globals: {:?}", self.globals);
         println!("    frames: {:?}", self.frames);
         self.current_frame()
@@ -292,7 +295,11 @@ impl VM {
                 self.stack[l - arg_count as usize - 1] = instance;
                 Ok(())
             }
-            Some(Callable::BoundMethod(bm)) => self.call(bm.method.clone(), arg_count),
+            Some(Callable::BoundMethod(bm)) => {
+                let l = self.stack.len();
+                self.stack[l - arg_count as usize - 1] = bm.receiver.clone();
+                self.call(bm.method.clone(), arg_count)
+            }
             None => Err(self.new_runtime_error(RuntimeProblem::CallToNonCallableValue(callee))),
         }
     }
@@ -350,8 +357,10 @@ impl VM {
     fn define_method(&mut self, method_name: &str) -> Result<(), Error> {
         let method = self.peek(0)?;
         let mut class = self.peek(1)?;
+        dbg!(&method, &class);
         let class = class.class_mut().unwrap();
         class.add_method(method_name, method);
+        self.pop()?;
 
         Ok(())
     }
@@ -370,10 +379,11 @@ impl VM {
         if self.frames.len() > MAX_CALL_STACK_DEPTH {
             return Err(self.new_runtime_error(RuntimeProblem::MaxCallStackDepthReached));
         }
-        self.frames.push(CallFrame::new(
+        // dbg!(&self.stack[self.stack.len() - arg_count as usize]);
+        self.frames.push(dbg!(CallFrame::new(
             function,
             self.stack.len() - arg_count as usize,
-        ));
+        )));
 
         Ok(())
     }
@@ -438,7 +448,7 @@ impl VM {
                     }
                     let frame = frame.unwrap();
                     let frame_stack_start = frame.slots_offset - 1;
-                    debug_assert!(self.stack[frame_stack_start].callable().is_some());
+                    // debug_assert!(self.stack[frame_stack_start].callable().is_some());
                     let returning_closure: *mut Value = &mut self.stack[frame_stack_start];
                     self.close_upvalues(returning_closure);
                     self.stack.drain(frame_stack_start..);
@@ -532,7 +542,7 @@ impl VM {
                         let is_local = self.read_byte() == 1;
                         let index = self.read_byte() as usize;
                         if is_local {
-                            let slot_offset = self.current_frame().slots_offset;
+                            let slot_offset = self.current_frame().slots_offset - 1;
                             let upvalue = self.capture_upvalue(slot_offset + index);
                             closure.closure_mut().unwrap().upvalues.push(upvalue);
                         } else {
@@ -557,12 +567,12 @@ impl VM {
                 OpCode::GetLocal => {
                     let slot = self.read_byte() as usize;
                     let slot_offset = self.current_frame().slots_offset;
-                    self.push(self.stack[slot_offset + slot].clone());
+                    self.push(self.stack[slot_offset + slot - 1].clone());
                 }
                 OpCode::SetLocal => {
                     let slot = self.read_byte() as usize;
                     let slot_offset = self.current_frame().slots_offset;
-                    self.stack[slot_offset + slot] = self.stack.last().unwrap().clone();
+                    self.stack[slot_offset + slot - 1] = self.stack.last().unwrap().clone();
                 }
                 OpCode::GetGlobal => {
                     let name = self.read_string().to_owned();
@@ -730,8 +740,7 @@ impl VM {
         let closure = self.allocator.borrow_mut().allocate_closure(function);
         self.pop()?;
         self.push(closure.clone());
-        self.frames
-            .push(CallFrame::new(closure, self.stack.len() - 1));
+        self.frames.push(CallFrame::new(closure, self.stack.len()));
         self.run()
     }
 }
@@ -924,7 +933,7 @@ for (var a = 1; a < 14; a = a + 1) {
     }
 
     #[test]
-    fn functions() {
+    fn lox_functions() {
         test_eval!(
             "fun areWeThereYet(a,b,c) { print 1; } print areWeThereYet;",
             "<fn areWeThereYet@3>"
@@ -948,6 +957,8 @@ for (var a = 1; a < 14; a = a + 1) {
             r#"fun x() { return 100; } fun y() { print x() + x(); } y();"#,
             "200"
         );
+        test_eval!("fun x(a) { a = a - 10; print a; } x(100);", "90");
+        test_eval!("fun x(a) { return 10*a; } fun y(a) { return 100*a; } fun z(a) { return x(a+1) + y(a+3); } print z(5);", "860");
         test_eval!(
             r#"
 fun fib(n) {
@@ -1203,6 +1214,49 @@ var scone = Scone();
 scone.topping("berries", "cream");
         "#,
             "scone with berries and cream"
+        );
+        test_eval!(
+            r#"
+class Nested {
+    method() {
+        fun function() {
+            print this;
+        }
+
+        function();
+    }
+}
+
+Nested().method();"#,
+            "class Nested instance"
+        );
+        test_eval!(
+            r#"
+        class Person {
+          sayName() {
+            print this.name;
+          }
+          setName(n) {
+            this.name = n;
+          }
+        }
+
+       var jane = Person();
+       jane.name = "Jane";
+
+       var method = jane.sayName;
+       method();
+       var setter = jane.setName;
+       setter("Foo");
+       method();
+       jane.name = "Bar";
+       method();
+       jane = Person();
+       method();
+       setter("Quux");
+       method();
+       "#,
+            "Jane\nFoo\nBar\nBar\nQuux"
         );
     }
 }

@@ -524,7 +524,7 @@ impl Debug for Value {
             Value::Boolean(b) => write!(f, "Boolean({})", b),
             Value::NativeFunction(nf) => write!(f, "NativeFunction({})", nf),
             Value::Obj(ptr) => {
-                write!(f, "Obj({:p} => {:?})", ptr, unsafe { &**ptr })
+                write!(f, "Obj({:?})", unsafe { &**ptr })
             }
         }
     }

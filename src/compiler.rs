@@ -46,7 +46,7 @@ static RULES: Lazy<HashMap<TokenType, ParseRule>> = Lazy::new(|| {
        TokenType::Print          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Return         => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Super          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::This           => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
+       TokenType::This           => ParseRule{prefix: Some(&Parser::this),     infix: None,                  precedence: Precedence::None},
        TokenType::True           => ParseRule{prefix: Some(&Parser::literal),  infix: None,                  precedence: Precedence::None},
        TokenType::Var            => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::While          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
@@ -110,6 +110,7 @@ pub enum Error {
 #[derive(Debug, PartialEq, Eq)]
 enum FunctionType {
     Function,
+    Method,
     Script,
 }
 
@@ -136,16 +137,24 @@ struct Compiler {
 }
 
 impl Compiler {
-    fn new(allocator: Rc<RefCell<Allocator>>) -> Self {
+    fn new(function_type: FunctionType, allocator: Rc<RefCell<Allocator>>) -> Self {
         let function = allocator
             .borrow_mut()
             .allocate_function(Function::default());
         Self {
-            locals: vec![],
+            locals: vec![Local {
+                name: if function_type != FunctionType::Function {
+                    "this".to_owned()
+                } else {
+                    "".to_owned()
+                },
+                depth: 0,
+                is_captured: false,
+            }],
             upvalues: vec![],
             scope_depth: 0,
             function,
-            function_type: FunctionType::Script,
+            function_type,
         }
     }
 
@@ -171,9 +180,12 @@ impl Compiler {
     }
 }
 
+struct ClassCompiler {}
+
 pub struct Parser {
     scanner: Scanner,
     compilers: Vec<Compiler>,
+    classes: Vec<ClassCompiler>,
     allocator: Rc<RefCell<Allocator>>,
     current: Option<Token>,
     previous: Option<Token>,
@@ -184,15 +196,11 @@ pub struct Parser {
 impl Parser {
     pub fn new(source: &str, allocator: Rc<RefCell<Allocator>>) -> Self {
         let scanner = scanner::Scanner::new(source);
-        let mut compiler = Compiler::new(allocator.clone());
-        compiler.locals.push(Local {
-            name: "".to_owned(),
-            depth: 0,
-            is_captured: false,
-        });
+        let compiler = Compiler::new(FunctionType::Script, allocator.clone());
         Self {
             scanner,
             compilers: vec![compiler],
+            classes: vec![],
             allocator,
             current: None,
             previous: None,
@@ -315,13 +323,13 @@ impl Parser {
 
     fn function(&mut self, function_type: FunctionType) {
         let compilers = self.compilers.len();
-        self.compilers.push(Compiler::new(self.allocator.clone()));
+        self.compilers
+            .push(Compiler::new(function_type, self.allocator.clone()));
         self.current_compiler_mut()
             .function
             .function_mut()
             .unwrap()
             .name = self.previous.as_ref().unwrap().value.clone();
-        self.current_compiler_mut().function_type = function_type;
 
         self.begin_scope();
         self.consume(TokenType::LeftParen, "Expect '(' after function name");
@@ -374,7 +382,7 @@ impl Parser {
         let name = self.previous.as_ref().unwrap().clone();
         let constant = self.identifier_constant(&name);
 
-        let function_type = FunctionType::Function;
+        let function_type = FunctionType::Method;
         self.function(function_type);
         self.emit_bytes(OpCode::Method as u8, constant);
     }
@@ -388,6 +396,8 @@ impl Parser {
         self.emit_bytes(OpCode::Class as u8, name_constant);
         self.define_variable(name_constant);
 
+        self.classes.push(ClassCompiler {});
+
         self.named_variable(&name, false);
         self.consume(TokenType::LeftBrace, "Expected '{' before class body");
         while !self.check(TokenType::RightBrace) && !self.check(TokenType::Eof) {
@@ -395,6 +405,8 @@ impl Parser {
         }
         self.consume(TokenType::RightBrace, "Expected '}' after class body");
         self.emit_byte(OpCode::Pop as u8);
+
+        self.classes.pop().unwrap();
     }
 
     fn var_declaration(&mut self) {
@@ -517,6 +529,16 @@ impl Parser {
 
     fn variable(&mut self, can_assign: bool) {
         self.named_variable(&self.previous.clone().unwrap(), can_assign);
+    }
+
+    fn this(&mut self, _can_assign: bool) {
+        if self.classes.is_empty() {
+            self.error(
+                self.scanner.line(),
+                "Can't use 'this' outside of a class".into(),
+            );
+        }
+        self.variable(false);
     }
 
     fn named_variable(&mut self, name: &Token, can_assign: bool) {
