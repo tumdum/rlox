@@ -148,6 +148,14 @@ impl Class {
     fn mark(&mut self) {
         self.methods.values_mut().for_each(|m| m.mark());
     }
+
+    pub fn copy_methods_to(&self, target: &mut Self) {
+        for (name, value) in &self.methods {
+            // Err is ok here since we don't wan to override existing method in
+            // subclass.
+            let _ = target.add_method(name, value.clone());
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]

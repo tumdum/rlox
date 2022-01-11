@@ -45,7 +45,7 @@ static RULES: Lazy<HashMap<TokenType, ParseRule>> = Lazy::new(|| {
        TokenType::Or             => ParseRule{prefix: None,                    infix: Some(&Parser::or),     precedence: Precedence::Or},
        TokenType::Print          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Return         => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
-       TokenType::Super          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
+       TokenType::Super          => ParseRule{prefix: Some(&Parser::super_),   infix: None,                  precedence: Precedence::None},
        TokenType::This           => ParseRule{prefix: Some(&Parser::this),     infix: None,                  precedence: Precedence::None},
        TokenType::True           => ParseRule{prefix: Some(&Parser::literal),  infix: None,                  precedence: Precedence::None},
        TokenType::Var            => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
@@ -181,7 +181,9 @@ impl Compiler {
     }
 }
 
-struct ClassCompiler {}
+struct ClassCompiler {
+    has_superclass: bool,
+}
 
 pub struct Parser {
     scanner: Scanner,
@@ -402,7 +404,25 @@ impl Parser {
         self.emit_bytes(OpCode::Class as u8, name_constant);
         self.define_variable(name_constant);
 
-        self.classes.push(ClassCompiler {});
+        self.classes.push(ClassCompiler {
+            has_superclass: false,
+        });
+
+        if self.match_token(TokenType::Less) {
+            self.consume(TokenType::Identifier, "Expected super class name");
+            self.variable(false);
+            if name.value == self.previous.as_ref().unwrap().value {
+                self.error(self.scanner.line(), "A class can't inherit from itself".into());
+            }
+
+            self.begin_scope();
+            self.add_local(self.synthetic_token("super"));
+            self.define_variable(0);
+
+            self.named_variable(&name, false);
+            self.classes.last_mut().unwrap().has_superclass = true;
+            self.emit_byte(OpCode::Inherit as u8);
+        }
 
         self.named_variable(&name, false);
         self.consume(TokenType::LeftBrace, "Expected '{' before class body");
@@ -411,6 +431,10 @@ impl Parser {
         }
         self.consume(TokenType::RightBrace, "Expected '}' after class body");
         self.emit_byte(OpCode::Pop as u8);
+
+        if self.classes.last().unwrap().has_superclass {
+            self.end_scope();
+        }
 
         self.classes.pop().unwrap();
     }
@@ -541,6 +565,31 @@ impl Parser {
 
     fn variable(&mut self, can_assign: bool) {
         self.named_variable(&self.previous.clone().unwrap(), can_assign);
+    }
+
+    fn synthetic_token(&self, text: &str) -> Token {
+        Token{
+            value: text.to_owned(),
+            type_: TokenType::Super,
+            line: usize::max_value(),
+        }
+    }
+
+    fn super_(&mut self, _can_assign: bool) {
+        if self.classes.is_empty() {
+            self.error(self.scanner.line(), "Can't use 'super' outside of a class".into());
+        }
+        if !self.classes.last().unwrap().has_superclass {
+            self.error(self.scanner.line(), "Can't use 'super' in a class with no superclass".into());
+        }
+        self.consume(TokenType::Dot, "Expect '.' after 'super'");
+        self.consume(TokenType::Identifier, "Expect superclass method name");
+        let name = self.previous.as_ref().unwrap().clone();
+        let name_constant = self.identifier_constant(&name);
+
+        self.named_variable(&self.synthetic_token("this"), false);
+        self.named_variable(&self.synthetic_token("super"), false);
+        self.emit_bytes(OpCode::GetSuper as u8, name_constant);
     }
 
     fn this(&mut self, _can_assign: bool) {

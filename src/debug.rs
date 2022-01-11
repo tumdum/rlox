@@ -38,6 +38,7 @@ impl Chunk {
             Ok(OpCode::SetUpValue) => self.byte_instruction("OP_SET_UPVALUE", offset),
             Ok(OpCode::GetProperty) => self.constant_instruction("OP_GET_PROPERTY", offset),
             Ok(OpCode::SetProperty) => self.constant_instruction("OP_SET_PROPERTY", offset),
+            Ok(OpCode::GetSuper) => self.constant_instruction("OP_GET_SUPER", offset),
             Ok(OpCode::Equal) => simple_instruction("OP_EQUAL", offset),
             Ok(OpCode::Greater) => simple_instruction("OP_GREATER", offset),
             Ok(OpCode::Less) => simple_instruction("OP_LESS", offset),
@@ -74,6 +75,7 @@ impl Chunk {
             Ok(OpCode::CloseUpValue) => simple_instruction("OP_CLOSE_UPVALUE", offset),
             Ok(OpCode::Return) => simple_instruction("OP_RETURN", offset),
             Ok(OpCode::Class) => self.constant_instruction("OP_CLASS", offset),
+            Ok(OpCode::Inherit) => simple_instruction("OP_INHERIT", offset),
             Ok(OpCode::Method) => self.constant_instruction("OP_METHOD", offset),
             _other => {
                 println!("Unknown opcode {}", instruction);

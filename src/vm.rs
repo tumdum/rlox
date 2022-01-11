@@ -1,7 +1,7 @@
 use crate::allocator::Allocator;
 use crate::chunk::InvalidOpCode;
 use crate::compiler::Parser;
-use crate::value::{Callable, Class, Closure, NativeFunction, ObjInner, Value};
+use crate::value::{self, Callable, Class, Closure, NativeFunction, ObjInner, Value};
 use crate::{Chunk, OpCode};
 use arrayvec::ArrayVec;
 use fxhash::FxHashMap;
@@ -62,6 +62,10 @@ pub enum RuntimeProblem {
     InvalidMethodAccess(String),
     #[error("Class {0} which has no initializer called with {1} parameters")]
     DefaultInitializerWithParameters(String, usize),
+    #[error("Value operation failed: {0}")]
+    ValueError(#[from] value::Error),
+    #[error("Superclass must be a class. Subclass {0} inherits form {1}")]
+    SuperclassMustBeAClass(Value, Value),
 }
 
 #[derive(Debug, Error)]
@@ -701,6 +705,11 @@ impl VM {
                     instance.set_field(field.to_owned(), value.clone());
                     self.push(value);
                 }
+                OpCode::GetSuper => {
+                    let name = self.read_string().to_owned();
+                    let superclass = self.pop()?;
+                    self.bind_method(&superclass, &name)?;
+                },
                 OpCode::Equal => {
                     let b = self.pop()?;
                     let a = self.pop()?;
@@ -712,6 +721,15 @@ impl VM {
                     self.push(class);
                     self.collect_garbage();
                 }
+                OpCode::Inherit => {
+                    let superclass = self.peek(1)?;
+                    let mut subclass = self.peek(0)?;
+                    match superclass.class() {
+                        Some(superclass) => superclass.copy_methods_to(subclass.class_mut().unwrap()),
+                        None => return Err(self.new_runtime_error(RuntimeProblem::SuperclassMustBeAClass(subclass, superclass))),
+                    }
+                    self.pop()?; // subclass
+                },
                 OpCode::Method => {
                     let method = self.read_string().to_owned();
                     self.define_method(&method)?;
@@ -1361,20 +1379,108 @@ maker.brew();"#,
     fn invoking_field() {
         test_eval!(
             r#"
-        class Oops {
-          init() {
-              fun f() {
-                    print "not a method";
-                        }
+class Oops {
+    init() {
+        fun f() {
+            print "not a method";
+        }
 
-                            this.field = f;
-                              }
-                              }
+        this.field = f;
+    }
+}
 
-                              var oops = Oops();
-                              oops.field();
+var oops = Oops();
+oops.field();
         "#,
             "not a method"
         );
+    }
+
+    #[test]
+    fn inherit() {
+        test_eval!(
+            r#"
+class Doughnut {
+    cook() {
+        print "Dunk in the fryer.";
+    }
+    finish() {
+        print "Burn!";
+    }
+}
+
+class Cruller < Doughnut {
+    finish() {
+        print "Glaze with icing.";
+    }
+}
+var x = Cruller();
+x.cook();
+x.finish();
+            "#, "Dunk in the fryer.\nGlaze with icing.");
+    }
+
+    #[test]
+    fn super_value() {
+        test_eval!(
+            r#"
+class A {
+    method() {
+        print "A method";
+    }
+}
+
+class B < A {
+    method() {
+        print "B method";
+    }
+
+    test() {
+        super.method();
+    }
+}
+
+class C < B {}
+
+C().test();
+            "#, "A method");
+        test_eval!(r#"
+class A {
+    method() {
+        print "A";
+    }
+}
+
+class B < A {
+    method() {
+        var closure = super.method;
+        closure();
+    }
+}
+
+var x = B();
+x.method();
+        "#, "A");
+        test_eval!(r#"
+class Doughnut {
+  cook() {
+    print "Dunk in the fryer.";
+    this.finish("sprinkles");
+  }
+
+  finish(ingredient) {
+    print "Finish with " + ingredient;
+  }
+}
+
+class Cruller < Doughnut {
+  finish(ingredient) {
+    // No sprinkles, always icing.
+    super.finish("icing");
+  }
+}
+var x = Cruller();
+x.finish("test");
+"#, "Finish with icing");
     }
 }
