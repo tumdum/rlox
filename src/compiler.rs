@@ -412,7 +412,10 @@ impl Parser {
             self.consume(TokenType::Identifier, "Expected super class name");
             self.variable(false);
             if name.value == self.previous.as_ref().unwrap().value {
-                self.error(self.scanner.line(), "A class can't inherit from itself".into());
+                self.error(
+                    self.scanner.line(),
+                    "A class can't inherit from itself".into(),
+                );
             }
 
             self.begin_scope();
@@ -568,7 +571,7 @@ impl Parser {
     }
 
     fn synthetic_token(&self, text: &str) -> Token {
-        Token{
+        Token {
             value: text.to_owned(),
             type_: TokenType::Super,
             line: usize::max_value(),
@@ -577,10 +580,16 @@ impl Parser {
 
     fn super_(&mut self, _can_assign: bool) {
         if self.classes.is_empty() {
-            self.error(self.scanner.line(), "Can't use 'super' outside of a class".into());
+            self.error(
+                self.scanner.line(),
+                "Can't use 'super' outside of a class".into(),
+            );
         }
         if !self.classes.last().unwrap().has_superclass {
-            self.error(self.scanner.line(), "Can't use 'super' in a class with no superclass".into());
+            self.error(
+                self.scanner.line(),
+                "Can't use 'super' in a class with no superclass".into(),
+            );
         }
         self.consume(TokenType::Dot, "Expect '.' after 'super'");
         self.consume(TokenType::Identifier, "Expect superclass method name");
@@ -588,8 +597,15 @@ impl Parser {
         let name_constant = self.identifier_constant(&name);
 
         self.named_variable(&self.synthetic_token("this"), false);
-        self.named_variable(&self.synthetic_token("super"), false);
-        self.emit_bytes(OpCode::GetSuper as u8, name_constant);
+        if self.match_token(TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.named_variable(&self.synthetic_token("super"), false);
+            self.emit_bytes(OpCode::SuperInvoke as u8, name_constant);
+            self.emit_byte(arg_count);
+        } else {
+            self.named_variable(&self.synthetic_token("super"), false);
+            self.emit_bytes(OpCode::GetSuper as u8, name_constant);
+        }
     }
 
     fn this(&mut self, _can_assign: bool) {

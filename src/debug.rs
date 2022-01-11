@@ -54,6 +54,7 @@ impl Chunk {
             Ok(OpCode::Loop) => self.jump_instruction("OP_JUMP", -1, offset),
             Ok(OpCode::Call) => self.byte_instruction("OP_CALL", offset),
             Ok(OpCode::Invoke) => self.invoke_instruction("OP_INVOKE", offset),
+            Ok(OpCode::SuperInvoke) => self.invoke_instruction("OP_SUPER_INVOKE", offset),
             Ok(OpCode::Closure) => {
                 let mut offset = offset + 2;
                 let constant = self.code[offset - 1] as usize;

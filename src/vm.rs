@@ -585,6 +585,13 @@ impl VM {
                     let arg_count = self.read_byte() as usize;
                     self.invoke(method, arg_count)?;
                 }
+                OpCode::SuperInvoke => {
+                    let method = self.read_string().to_owned();
+                    let arg_count = self.read_byte() as usize;
+                    let superclass = self.pop()?;
+                    let superclass = superclass.class().unwrap();
+                    self.invoke_from_class(superclass, method, arg_count)?;
+                }
                 OpCode::Closure => {
                     let constant = self.read_constant().clone();
                     let mut closure = self.allocator.borrow_mut().allocate_closure(constant);
@@ -709,7 +716,7 @@ impl VM {
                     let name = self.read_string().to_owned();
                     let superclass = self.pop()?;
                     self.bind_method(&superclass, &name)?;
-                },
+                }
                 OpCode::Equal => {
                     let b = self.pop()?;
                     let a = self.pop()?;
@@ -725,11 +732,17 @@ impl VM {
                     let superclass = self.peek(1)?;
                     let mut subclass = self.peek(0)?;
                     match superclass.class() {
-                        Some(superclass) => superclass.copy_methods_to(subclass.class_mut().unwrap()),
-                        None => return Err(self.new_runtime_error(RuntimeProblem::SuperclassMustBeAClass(subclass, superclass))),
+                        Some(superclass) => {
+                            superclass.copy_methods_to(subclass.class_mut().unwrap())
+                        }
+                        None => {
+                            return Err(self.new_runtime_error(
+                                RuntimeProblem::SuperclassMustBeAClass(subclass, superclass),
+                            ))
+                        }
                     }
                     self.pop()?; // subclass
-                },
+                }
                 OpCode::Method => {
                     let method = self.read_string().to_owned();
                     self.define_method(&method)?;
@@ -1417,7 +1430,9 @@ class Cruller < Doughnut {
 var x = Cruller();
 x.cook();
 x.finish();
-            "#, "Dunk in the fryer.\nGlaze with icing.");
+            "#,
+            "Dunk in the fryer.\nGlaze with icing."
+        );
     }
 
     #[test]
@@ -1443,8 +1458,11 @@ class B < A {
 class C < B {}
 
 C().test();
-            "#, "A method");
-        test_eval!(r#"
+            "#,
+            "A method"
+        );
+        test_eval!(
+            r#"
 class A {
     method() {
         print "A";
@@ -1460,8 +1478,11 @@ class B < A {
 
 var x = B();
 x.method();
-        "#, "A");
-        test_eval!(r#"
+        "#,
+            "A"
+        );
+        test_eval!(
+            r#"
 class Doughnut {
   cook() {
     print "Dunk in the fryer.";
@@ -1481,6 +1502,8 @@ class Cruller < Doughnut {
 }
 var x = Cruller();
 x.finish("test");
-"#, "Finish with icing");
+"#,
+            "Finish with icing"
+        );
     }
 }
