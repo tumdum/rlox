@@ -633,6 +633,10 @@ impl Parser {
         if can_assign && self.match_token(TokenType::Equal) {
             self.expression();
             self.emit_bytes(OpCode::SetProperty as u8, name);
+        } else if self.match_token(TokenType::LeftParen) {
+            let arg_count = self.argument_list();
+            self.emit_bytes(OpCode::Invoke as u8, name);
+            self.emit_byte(arg_count);
         } else {
             self.emit_bytes(OpCode::GetProperty as u8, name);
         }

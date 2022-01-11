@@ -52,6 +52,7 @@ impl Chunk {
             Ok(OpCode::JumpIfFalse) => self.jump_instruction("OP_JUMP_IF_FALSE", 1, offset),
             Ok(OpCode::Loop) => self.jump_instruction("OP_JUMP", -1, offset),
             Ok(OpCode::Call) => self.byte_instruction("OP_CALL", offset),
+            Ok(OpCode::Invoke) => self.invoke_instruction("OP_INVOKE", offset),
             Ok(OpCode::Closure) => {
                 let mut offset = offset + 2;
                 let constant = self.code[offset - 1] as usize;
@@ -100,6 +101,16 @@ impl Chunk {
         let jump = ((self.code[offset + 1] as u16) << 8 | self.code[offset + 2] as u16) as isize;
         let off = offset as isize;
         println!("{:>16} {:4} -> {}", name, offset, off + 3 + sign * jump);
+        offset + 3
+    }
+
+    fn invoke_instruction(&self, name: &str, offset: usize) -> usize {
+        let constant = self.code[offset + 1] as usize;
+        let arg_count = self.code[offset + 2];
+        println!(
+            "{:>16} ({} args) {:4} '{:?}'",
+            name, arg_count, constant, self.constants[constant]
+        );
         offset + 3
     }
 }

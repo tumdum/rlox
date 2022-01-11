@@ -1,7 +1,7 @@
 use crate::allocator::Allocator;
 use crate::chunk::InvalidOpCode;
 use crate::compiler::Parser;
-use crate::value::{Callable, Closure, NativeFunction, ObjInner, Value};
+use crate::value::{Callable, Class, Closure, NativeFunction, ObjInner, Value};
 use crate::{Chunk, OpCode};
 use arrayvec::ArrayVec;
 use fxhash::FxHashMap;
@@ -58,6 +58,8 @@ pub enum RuntimeProblem {
     UndefinedProperty(String),
     #[error("Only instances have fields, tried access fields of {0}")]
     InvalidPropertyAccess(String),
+    #[error("Only instances have mothods, tried to call method on {0}")]
+    InvalidMethodAccess(String),
     #[error("Class {0} which has no initializer called with {1} parameters")]
     DefaultInitializerWithParameters(String, usize),
 }
@@ -320,6 +322,38 @@ impl VM {
         }
     }
 
+    fn invoke(&mut self, method: String, arg_count: usize) -> Result<(), Error> {
+        let receiver = self.peek(arg_count)?;
+        let instance = match receiver.instance() {
+            Some(instance) => instance,
+            None => {
+                return Err(self.new_runtime_error(RuntimeProblem::InvalidMethodAccess(
+                    receiver.type_name().to_owned(),
+                )))
+            }
+        };
+
+        if let Some(value) = instance.get_field(&method) {
+            let l = self.stack.len();
+            self.stack[l - arg_count as usize - 1] = value.clone();
+            return self.call_value(value.clone(), arg_count as u8);
+        }
+
+        self.invoke_from_class(instance.class.class().unwrap(), method, arg_count)
+    }
+
+    fn invoke_from_class(
+        &mut self,
+        class: &Class,
+        method: String,
+        arg_count: usize,
+    ) -> Result<(), Error> {
+        match class.get_method(&method) {
+            Some(method) => self.call(method.clone(), arg_count as u8),
+            None => Err(self.new_runtime_error(RuntimeProblem::UndefinedProperty(method))),
+        }
+    }
+
     fn bind_method(&mut self, class: &Value, name: &str) -> Result<(), Error> {
         let method = match class.class().unwrap().get_method(name) {
             Some(method) => method.clone(),
@@ -541,6 +575,11 @@ impl VM {
                 OpCode::Constant => {
                     let constant = self.read_constant().clone();
                     self.push(constant);
+                }
+                OpCode::Invoke => {
+                    let method = self.read_string().to_owned();
+                    let arg_count = self.read_byte() as usize;
+                    self.invoke(method, arg_count)?;
                 }
                 OpCode::Closure => {
                     let constant = self.read_constant().clone();
@@ -1315,6 +1354,27 @@ class CoffeeMaker {
 var maker = CoffeeMaker("coffee and chicory");
 maker.brew();"#,
             "Enjoy your cup of coffee and chicory"
+        );
+    }
+
+    #[test]
+    fn invoking_field() {
+        test_eval!(
+            r#"
+        class Oops {
+          init() {
+              fun f() {
+                    print "not a method";
+                        }
+
+                            this.field = f;
+                              }
+                              }
+
+                              var oops = Oops();
+                              oops.field();
+        "#,
+            "not a method"
         );
     }
 }

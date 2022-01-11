@@ -65,11 +65,12 @@ pub enum OpCode {
     JumpIfFalse = 25,
     Loop = 26,
     Call = 27,
-    Closure = 28,
-    CloseUpValue = 29,
-    Return = 30,
-    Class = 31,
-    Method = 32,
+    Invoke = 28,
+    Closure = 29,
+    CloseUpValue = 30,
+    Return = 31,
+    Class = 32,
+    Method = 33,
 }
 
 #[derive(Debug, Error)]
@@ -109,11 +110,12 @@ impl TryFrom<u8> for OpCode {
             25 => Ok(OpCode::JumpIfFalse),
             26 => Ok(OpCode::Loop),
             27 => Ok(OpCode::Call),
-            28 => Ok(OpCode::Closure),
-            29 => Ok(OpCode::CloseUpValue),
-            30 => Ok(OpCode::Return),
-            31 => Ok(OpCode::Class),
-            32 => Ok(OpCode::Method),
+            28 => Ok(OpCode::Invoke),
+            29 => Ok(OpCode::Closure),
+            30 => Ok(OpCode::CloseUpValue),
+            31 => Ok(OpCode::Return),
+            32 => Ok(OpCode::Class),
+            33 => Ok(OpCode::Method),
             other => Err(InvalidOpCode(other)),
         }
     }
