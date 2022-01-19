@@ -98,6 +98,11 @@ impl Allocator {
         self.record_object(bound_method, false)
     }
 
+    pub fn allocate_vector(&mut self, values: Vec<Value>) -> Value {
+        let bound_method = ObjInner::Vector(values);
+        self.record_object(bound_method, false)
+    }
+
     fn record_object(&mut self, obj: ObjInner, intern: bool) -> Value {
         self.bytes_allocated += obj.size();
         let obj = Obj {

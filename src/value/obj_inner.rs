@@ -1,4 +1,4 @@
-use crate::value::{BoundMethod, Class, Closure, Function, ObjInstance, UpValue};
+use crate::value::{BoundMethod, Class, Closure, Function, ObjInstance, UpValue, Value};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub enum ObjInner {
@@ -9,6 +9,7 @@ pub enum ObjInner {
     Class(Class),
     ObjInstance(ObjInstance),
     BoundMethod(BoundMethod),
+    Vector(Vec<Value>),
 }
 
 impl ObjInner {
@@ -22,6 +23,7 @@ impl ObjInner {
             Self::Class(_) => "class",
             Self::ObjInstance(_) => "instance",
             Self::BoundMethod(_) => "bound_method",
+            Self::Vector(_) => "vector",
         }
     }
 
@@ -34,6 +36,7 @@ impl ObjInner {
             Self::Class(class) => class.mark(),
             Self::ObjInstance(instance) => instance.mark(),
             Self::BoundMethod(bound_method) => bound_method.mark(),
+            Self::Vector(v) => v.iter_mut().for_each(|v| v.mark()),
         }
     }
 
@@ -47,6 +50,7 @@ impl ObjInner {
                 Self::Class(_) => 0, // TODO
                 Self::ObjInstance(instance) => instance.size(),
                 Self::BoundMethod(_) => 0,
+                Self::Vector(_) => 0,
             }
     }
 }

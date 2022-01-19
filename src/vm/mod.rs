@@ -12,6 +12,8 @@ use std::path::Path;
 use std::rc::Rc;
 use thiserror::Error;
 
+mod builtins;
+
 const MAX_CALL_STACK_DEPTH: usize = 1000;
 const MAX_STACK_SIZE: usize = 256;
 pub const INITIALIZER_NAME: &str = "init";
@@ -163,27 +165,6 @@ impl VM {
 
     fn current_frame_mut(&mut self) -> &mut CallFrame {
         self.frames.last_mut().unwrap()
-    }
-
-    pub fn register_bulitins(&mut self) {
-        self.define_native("time", move |_args| {
-            match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-                Ok(t) => t.as_secs_f64().into(),
-                Err(_) => Value::Nil,
-            }
-        });
-        let output_clone = self.output.clone();
-        self.define_native("println", move |args| {
-            for (i, arg) in args.iter().enumerate() {
-                if i == 0 {
-                    write!(output_clone.borrow_mut(), "{}", arg).unwrap();
-                } else {
-                    write!(output_clone.borrow_mut(), " {}", arg).unwrap();
-                }
-            }
-            writeln!(output_clone.borrow_mut()).unwrap();
-            Value::Nil
-        });
     }
 
     fn read_byte(&mut self) -> u8 {
@@ -416,16 +397,6 @@ impl VM {
         self.pop()?;
 
         Ok(())
-    }
-
-    fn define_native(&mut self, name: &str, f: impl Fn(&[Value]) -> Value + 'static) {
-        self.globals.insert(
-            name.to_owned(),
-            Value::NativeFunction(NativeFunction {
-                name: name.to_owned(),
-                function: Rc::new(f),
-            }),
-        );
     }
 
     fn call(&mut self, function: Value, arg_count: u8) -> Result<(), Error> {
@@ -1505,5 +1476,11 @@ x.finish("test");
 "#,
             "Finish with icing"
         );
+    }
+
+    #[test]
+    fn vector() {
+        test_eval!("println(vec(1,nil,\"test\",vec()));", "[1, nil, test, []]");
+        test_eval!("var x = vec(); println(x);", "[]");
     }
 }
