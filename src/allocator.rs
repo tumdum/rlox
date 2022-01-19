@@ -1,5 +1,5 @@
 use crate::value::{
-    BoundMethod, Class, Closure, Function, Obj, ObjInner, ObjInstance, UpValue, Value,
+    Vector, BoundMethod, Class, Closure, Function, Obj, ObjInner, ObjInstance, UpValue, Value,
 };
 use std::collections::HashSet;
 use std::mem::transmute;
@@ -99,7 +99,7 @@ impl Allocator {
     }
 
     pub fn allocate_vector(&mut self, values: Vec<Value>) -> Value {
-        let bound_method = ObjInner::Vector(values);
+        let bound_method = ObjInner::Vector(Vector(values));
         self.record_object(bound_method, false)
     }
 

@@ -1,4 +1,4 @@
-use crate::value::Value;
+use crate::value::{Value};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub struct Class {

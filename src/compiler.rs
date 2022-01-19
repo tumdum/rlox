@@ -1011,7 +1011,7 @@ impl Parser {
     }
 
     fn current_chunk(&mut self) -> &mut Chunk {
-        self.current_compiler_mut().function.chunk_mut()
+        self.current_compiler_mut().function.chunk_mut().unwrap()
     }
 
     fn current_compiler(&self) -> &Compiler {

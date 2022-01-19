@@ -4,6 +4,8 @@ use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use thiserror::Error;
 
+pub type NativeMethod = &'static dyn Fn(&Value, &[Value])->Value;
+
 mod closure;
 pub use closure::Closure;
 
@@ -30,6 +32,9 @@ pub use obj_inner::ObjInner;
 
 mod bound_method;
 pub use bound_method::BoundMethod;
+
+mod vector;
+pub use vector::Vector;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -71,122 +76,122 @@ impl Value {
         matches!(self, Value::Nil) || matches!(self, Value::Boolean(false))
     }
 
-    pub fn string(&self) -> Option<&str> {
+    fn inner(&self) -> Option<&ObjInner> {
         if let Self::Obj(ptr) = self {
-            if let ObjInner::String(s) = &**unsafe { &**ptr } {
-                return Some(s);
-            }
+            Some(&**unsafe { &**ptr })
+        } else {
+            None
+        }
+    }
+
+    fn inner_mut(&mut self) -> Option<&mut ObjInner> {
+        if let Value::Obj(ptr) = self {
+            Some(unsafe { &mut **ptr })
+        } else {
+            None
+        }
+    }
+
+    pub fn string(&self) -> Option<&str> {
+        if let Some(ObjInner::String(s)) = self.inner() {
+            return Some(s);
         }
         None
     }
 
     pub fn function_mut(&mut self) -> Option<&mut Function> {
-        if let Value::Obj(ptr) = self {
-            let obj: &mut Obj = unsafe { &mut **ptr };
-            if let ObjInner::Function(ref mut f) = **obj {
-                return Some(f);
-            }
+        if let Some(ObjInner::Function(ref mut f)) = self.inner_mut() {
+            return Some(f)
         }
         None
     }
 
     pub fn function(&self) -> Option<&Function> {
-        if let Value::Obj(ptr) = self {
-            let obj: &Obj = unsafe { &**ptr };
-            if let ObjInner::Function(f) = &obj.inner {
-                return Some(f);
-            }
+        if let Some(ObjInner::Function(f)) = self.inner() {
+            return Some(f);
+        }
+        None
+    }
+
+    pub fn vector(&self) -> Option<&Vector> {
+        if let Some(ObjInner::Vector(v)) = self.inner() {
+            return Some(v);
+        }
+        None
+    }
+
+    pub fn number(&self) -> Option<&f64> {
+        if let Self::Number(f) = self {
+            return Some(f);
         }
         None
     }
 
     pub fn closure_mut(&mut self) -> Option<&mut Closure> {
-        if let Value::Obj(ptr) = self {
-            let obj: &mut Obj = unsafe { &mut **ptr };
-            if let ObjInner::Closure(ref mut f) = **obj {
-                return Some(f);
-            }
+        if let Some(ObjInner::Closure(ref mut c)) = self.inner_mut() {
+            return Some(c)
         }
         None
     }
+
     pub fn closure(&self) -> Option<&Closure> {
-        if let Value::Obj(ptr) = self {
-            let obj: &Obj = unsafe { &**ptr };
-            if let ObjInner::Closure(f) = &obj.inner {
-                return Some(f);
-            }
+        if let Some(ObjInner::Closure(c)) = self.inner() {
+            return Some(c);
         }
         None
     }
 
     pub fn upvalue_mut(&mut self) -> Option<&mut UpValue> {
-        if let Value::Obj(ptr) = self {
-            let obj: &mut Obj = unsafe { &mut **ptr };
-            if let ObjInner::UpValue(ref mut v) = &mut obj.inner {
-                return Some(v);
-            }
+        if let Some(ObjInner::UpValue(ref mut v)) = self.inner_mut() {
+            return Some(v)
         }
         None
     }
 
     pub fn upvalue(&self) -> Option<&UpValue> {
-        if let Value::Obj(ptr) = self {
-            let obj: &Obj = unsafe { &**ptr };
-            if let ObjInner::UpValue(v) = &**obj {
-                return Some(v);
-            }
+        if let Some(ObjInner::UpValue(v)) = self.inner() {
+            return Some(v);
         }
         None
     }
 
     pub fn class_mut(&mut self) -> Option<&mut Class> {
-        if let Value::Obj(ptr) = self {
-            let obj: &mut Obj = unsafe { &mut **ptr };
-            if let ObjInner::Class(ref mut c) = &mut obj.inner {
-                return Some(c);
-            }
+        if let Some(ObjInner::Class(ref mut c)) = self.inner_mut() {
+            return Some(c)
         }
         None
     }
 
     pub fn class(&self) -> Option<&Class> {
-        if let Value::Obj(ptr) = self {
-            let obj: &Obj = unsafe { &**ptr };
-            if let ObjInner::Class(c) = &**obj {
-                return Some(c);
-            }
+        if let Some(ObjInner::Class(c)) = self.inner() {
+            return Some(c);
         }
         None
     }
 
     pub fn instance_mut(&mut self) -> Option<&mut ObjInstance> {
-        if let Value::Obj(ptr) = self {
-            let obj: &mut Obj = unsafe { &mut **ptr };
-            if let ObjInner::ObjInstance(ref mut v) = &mut obj.inner {
-                return Some(v);
-            }
+        if let Some(ObjInner::ObjInstance(ref mut v)) = self.inner_mut() {
+            return Some(v)
         }
         None
     }
 
     pub fn instance(&self) -> Option<&ObjInstance> {
-        if let Value::Obj(ptr) = self {
-            let obj: &Obj = unsafe { &**ptr };
-            if let ObjInner::ObjInstance(i) = &obj.inner {
-                return Some(i);
-            }
+        if let Some(ObjInner::ObjInstance(v)) = self.inner() {
+            return Some(v);
         }
         None
     }
 
-    pub fn chunk_mut(&mut self) -> &mut Chunk {
-        if let Value::Obj(ptr) = self {
-            let obj: &mut Obj = unsafe { &mut **ptr };
-            if let ObjInner::Function(f) = &mut **obj {
-                return &mut f.chunk;
-            }
+    pub fn chunk_mut(&mut self) -> Option<&mut Chunk> {
+        self.function_mut().map(|f| &mut f.chunk)
+    }
+
+    pub fn get_native_method(&self, name: &str) -> Option<NativeMethod> {
+        match self {
+            Self::Obj(ptr) => unsafe { &**ptr }.get_native_method(name),
+            _ => None,
         }
-        todo!()
     }
 
     pub fn callable(&self) -> Option<Callable> {

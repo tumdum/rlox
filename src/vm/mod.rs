@@ -1,7 +1,7 @@
 use crate::allocator::Allocator;
 use crate::chunk::InvalidOpCode;
 use crate::compiler::Parser;
-use crate::value::{self, Callable, Class, Closure, NativeFunction, ObjInner, Value};
+use crate::value::{self, NativeMethod, Callable, Class, Closure, ObjInner, Value};
 use crate::{Chunk, OpCode};
 use arrayvec::ArrayVec;
 use fxhash::FxHashMap;
@@ -309,6 +309,11 @@ impl VM {
 
     fn invoke(&mut self, method: String, arg_count: usize) -> Result<(), Error> {
         let receiver = self.peek(arg_count)?;
+
+        if let Some(native_method) = receiver.get_native_method(&method) {
+            return self.call_native_method(native_method, receiver, arg_count as u8);
+        }
+
         let instance = match receiver.instance() {
             Some(instance) => instance,
             None => {
@@ -404,10 +409,17 @@ impl VM {
             return Err(self.new_runtime_error(RuntimeProblem::MaxCallStackDepthReached));
         }
         self.frames.push(CallFrame::new(
-            function,
-            self.stack.len() - arg_count as usize,
+                function,
+                self.stack.len() - arg_count as usize,
         ));
 
+        Ok(())
+    }
+    fn call_native_method(&mut self, method: NativeMethod, receiver: Value, arg_count: u8) -> Result<(), Error> {
+        let l = self.stack.len();
+        let ret = (method)(&receiver, &self.stack[l - arg_count as usize..]);
+        self.stack.drain((l - arg_count as usize - 1)..);
+        self.stack.push(ret);
         Ok(())
     }
 
@@ -424,9 +436,9 @@ impl VM {
                     let slot = self.read_byte() as usize;
                     let value: *mut Value =
                         self.current_frame().closure.closure().unwrap().upvalues[slot]
-                            .upvalue()
-                            .unwrap()
-                            .location;
+                        .upvalue()
+                        .unwrap()
+                        .location;
                     let value: Value = unsafe { (&*value).clone() };
                     self.push(value);
                 }
@@ -435,9 +447,9 @@ impl VM {
                     let new_value = self.peek(0)?;
                     let value: *mut Value =
                         self.current_frame().closure.closure().unwrap().upvalues[slot]
-                            .upvalue()
-                            .unwrap()
-                            .location;
+                        .upvalue()
+                        .unwrap()
+                        .location;
                     unsafe { *value = new_value };
                 }
                 OpCode::Jump => {
@@ -508,20 +520,20 @@ impl VM {
                                 }
                                 (_, _) => {
                                     return Err(self.new_runtime_error(
-                                        RuntimeProblem::InvalidOperands(
-                                            a.clone(),
-                                            "+".to_owned(),
-                                            b.clone(),
-                                        ),
+                                            RuntimeProblem::InvalidOperands(
+                                                a.clone(),
+                                                "+".to_owned(),
+                                                b.clone(),
+                                            ),
                                     ))
                                 }
                             }
                         },
                         _ => {
                             return Err(self.new_runtime_error(RuntimeProblem::InvalidOperands(
-                                a.clone(),
-                                "+".to_owned(),
-                                b.clone(),
+                                        a.clone(),
+                                        "+".to_owned(),
+                                        b.clone(),
                             )))
                         }
                     };
@@ -541,8 +553,8 @@ impl VM {
                         Value::Number(n) => self.push(-n),
                         _ => {
                             return Err(self.new_runtime_error(RuntimeProblem::InvalidOperand(
-                                "-".to_owned(),
-                                val,
+                                        "-".to_owned(),
+                                        val,
                             )))
                         }
                     }
@@ -649,9 +661,9 @@ impl VM {
                         Some(i) => i,
                         None => {
                             return Err(self.new_runtime_error(
-                                RuntimeProblem::InvalidPropertyAccess(
-                                    instance.type_name().to_owned(),
-                                ),
+                                    RuntimeProblem::InvalidPropertyAccess(
+                                        instance.type_name().to_owned(),
+                                    ),
                             ))
                         }
                     };
@@ -673,9 +685,9 @@ impl VM {
                         Some(i) => i,
                         None => {
                             return Err(self.new_runtime_error(
-                                RuntimeProblem::InvalidPropertyAccess(
-                                    instance.type_name().to_owned(),
-                                ),
+                                    RuntimeProblem::InvalidPropertyAccess(
+                                        instance.type_name().to_owned(),
+                                    ),
                             ))
                         }
                     };
@@ -708,7 +720,7 @@ impl VM {
                         }
                         None => {
                             return Err(self.new_runtime_error(
-                                RuntimeProblem::SuperclassMustBeAClass(subclass, superclass),
+                                    RuntimeProblem::SuperclassMustBeAClass(subclass, superclass),
                             ))
                         }
                     }
@@ -911,7 +923,7 @@ mod tests {
         }
         print x;
         "#,
-            "3\n2\n1\n0"
+        "3\n2\n1\n0"
         );
         test_eval!(
             r#"
@@ -928,7 +940,7 @@ mod tests {
             print x;
         }
         "#,
-            "3\n3\n3"
+        "3\n3\n3"
         );
     }
 
@@ -964,9 +976,9 @@ print a;
         test_eval!(fib, "377");
     }
 
-    #[test]
-    fn r#for() {
-        let fib = r#"
+#[test]
+fn r#for() {
+    let fib = r#"
 print 0;
 print 1;
 var prev = 0;
@@ -985,37 +997,37 @@ for (var a = 1; a < 14; a = a + 1) {
         test_eval!("for(;false;) { print 1; }", "");
         test_eval!("var x = 1; for(;x < 2;x = x + 1) { print x; }", "1");
         test_eval!("var x = 1; for(;x < 2;) { print x; x = x + 1; }", "1");
-    }
+}
 
-    #[test]
-    fn lox_functions() {
-        test_eval!(
-            "fun areWeThereYet(a,b,c) { print 1; } print areWeThereYet;",
-            "<fn areWeThereYet@3>"
-        );
-        test_eval!("fun x(a) { print a; } x(1);", "1");
-        test_eval!("fun x(a,b,c) { print a + b + c; } x(1,100,10000);", "10101");
-        test_eval!(
-            r#"var a = 999.3; fun x(a) { print a; } x("test"); print a;"#,
-            "test\n999.3"
-        );
-        test_eval!(
-            r#"var a = 999.3; fun x(a,b,c) { print a + b + c; } x("1","100","10000"); print a;"#,
-            "110010000\n999.3"
-        );
-        test_eval!(r#"fun x(a) { print a; } x("test"); x("foo");"#, "test\nfoo");
-        test_eval!(
-            r#"fun x(a) { return 100 * a; } print x(1); print x(13);"#,
-            "100\n1300"
-        );
-        test_eval!(
-            r#"fun x() { return 100; } fun y() { print x() + x(); } y();"#,
-            "200"
-        );
-        test_eval!("fun x(a) { a = a - 10; print a; } x(100);", "90");
-        test_eval!("fun x(a) { return 10*a; } fun y(a) { return 100*a; } fun z(a) { return x(a+1) + y(a+3); } print z(5);", "860");
-        test_eval!(
-            r#"
+#[test]
+fn lox_functions() {
+    test_eval!(
+        "fun areWeThereYet(a,b,c) { print 1; } print areWeThereYet;",
+        "<fn areWeThereYet@3>"
+    );
+    test_eval!("fun x(a) { print a; } x(1);", "1");
+    test_eval!("fun x(a,b,c) { print a + b + c; } x(1,100,10000);", "10101");
+    test_eval!(
+        r#"var a = 999.3; fun x(a) { print a; } x("test"); print a;"#,
+        "test\n999.3"
+    );
+    test_eval!(
+        r#"var a = 999.3; fun x(a,b,c) { print a + b + c; } x("1","100","10000"); print a;"#,
+        "110010000\n999.3"
+    );
+    test_eval!(r#"fun x(a) { print a; } x("test"); x("foo");"#, "test\nfoo");
+    test_eval!(
+        r#"fun x(a) { return 100 * a; } print x(1); print x(13);"#,
+        "100\n1300"
+    );
+    test_eval!(
+        r#"fun x() { return 100; } fun y() { print x() + x(); } y();"#,
+        "200"
+    );
+    test_eval!("fun x(a) { a = a - 10; print a; } x(100);", "90");
+    test_eval!("fun x(a) { return 10*a; } fun y(a) { return 100*a; } fun z(a) { return x(a+1) + y(a+3); } print z(5);", "860");
+    test_eval!(
+        r#"
 fun fib(n) {
     if (n == 1) {
         return 0;
@@ -1031,19 +1043,19 @@ for (var a = 1; a < 15; a = a + 1) {
 }
             "#,
             "0\n1\n1\n2\n3\n5\n8\n13\n21\n34\n55\n89\n144\n233"
-        );
-        test_eval!(
-            r#"
+    );
+    test_eval!(
+        r#"
 fun fact(n) {
     if (n <= 1) { return 1; }
     return n * fact(n-1);
 }
 print fact(11);"#,
-            "39916800"
-        );
+"39916800"
+    );
     }
-    #[test]
-    fn native_functions() {
+#[test]
+fn native_functions() {
         // TODO: use registered builtins
         let output = Rc::new(RefCell::new(vec![]));
         let mut vm = VM::new(output.clone());
@@ -1482,5 +1494,8 @@ x.finish("test");
     fn vector() {
         test_eval!("println(vec(1,nil,\"test\",vec()));", "[1, nil, test, []]");
         test_eval!("var x = vec(); println(x);", "[]");
+        test_eval!("println(vec().len());", "0");
+        test_eval!("println(vec(1,nil,3,true).len());", "4");
+        test_eval!("var x = vec(1,nil,true); println(x.get(0), x.get(1), x.get(2));", "1 nil true");
     }
 }
