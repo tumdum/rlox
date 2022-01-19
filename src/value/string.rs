@@ -1,5 +1,5 @@
-use crate::value::{NativeMethod, Value};
 use crate::allocator::Allocator;
+use crate::value::{NativeMethod, Value};
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::Deref;
 

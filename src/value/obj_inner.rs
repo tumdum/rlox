@@ -42,20 +42,6 @@ impl ObjInner {
         }
     }
 
-    pub fn size(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + match self {
-                Self::String(s) => s.as_bytes().len(),
-                Self::Function(f) => f.size(),
-                Self::Closure(c) => c.size(),
-                Self::UpValue(_) => 0,
-                Self::Class(_) => 0, // TODO
-                Self::ObjInstance(instance) => instance.size(),
-                Self::BoundMethod(_) => 0,
-                Self::Vector(_) => 0,
-            }
-    }
-
     pub fn get_native_method(&self, name: &str) -> Option<NativeMethod> {
         match self {
             Self::Vector(v) => v.get_native_method(name),

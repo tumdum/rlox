@@ -19,7 +19,7 @@ impl VM {
                 Err(e) => {
                     eprintln!("Failed to parse {} to int: {}", s, e);
                     Value::Nil
-                },
+                }
             }
         });
 

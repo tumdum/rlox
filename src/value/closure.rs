@@ -12,10 +12,6 @@ impl Closure {
         self.function.mark();
         self.upvalues.iter_mut().for_each(|v| v.mark());
     }
-
-    pub fn size(&self) -> usize {
-        0
-    }
 }
 
 impl Debug for Closure {

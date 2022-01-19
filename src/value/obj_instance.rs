@@ -27,8 +27,4 @@ impl ObjInstance {
     pub fn set_field(&mut self, name: String, value: Value) {
         self.fields.insert(name, value);
     }
-
-    pub fn size(&self) -> usize {
-        self.fields.keys().map(|k| k.as_bytes().len()).sum()
-    }
 }

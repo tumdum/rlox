@@ -8,6 +8,7 @@ edition = "2021"
 [features]
 always_gc = []
 alloc_logs = []
+trace = []
 
 [dependencies]
 thiserror="1"

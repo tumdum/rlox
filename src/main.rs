@@ -9,9 +9,9 @@ mod vm;
 use crate::vm::VM;
 use chunk::{Chunk, OpCode};
 use std::cell::RefCell;
+use std::io::{stdin, stdout, BufReader};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::io::{BufReader, stdout, stdin};
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]

@@ -15,6 +15,7 @@ use thiserror::Error;
 mod builtins;
 
 #[cfg(test)]
+#[cfg(not(debug_assertions))]
 mod aoc_tests;
 
 const MAX_CALL_STACK_DEPTH: usize = 1000;
@@ -133,6 +134,12 @@ pub struct VM {
     current_parser: Option<Parser>,
 }
 
+impl Drop for VM {
+    fn drop(&mut self) {
+        self.collect_garbage(true);
+    }
+}
+
 impl VM {
     pub fn new(
         output: Rc<RefCell<dyn std::io::Write>>,
@@ -222,6 +229,9 @@ impl VM {
         ret
     }
 
+    #[cfg(not(feature = "trace"))]
+    fn trace(&self) {}
+    #[cfg(feature = "trace")]
     fn trace(&self) {
         println!("     stack: {:?}", self.stack.len());
         for v in &self.stack {
@@ -326,7 +336,8 @@ impl VM {
             Some(instance) => instance,
             None => {
                 return Err(self.new_runtime_error(RuntimeProblem::InvalidMethodAccess(
-                    receiver.type_name().to_owned(), method
+                    receiver.type_name().to_owned(),
+                    method,
                 )))
             }
         };
@@ -430,7 +441,11 @@ impl VM {
         arg_count: u8,
     ) -> Result<(), Error> {
         let l = self.stack.len();
-        let ret = (method)(&mut self.allocator.borrow_mut(), &mut receiver, &self.stack[l - arg_count as usize..]);
+        let ret = (method)(
+            &mut self.allocator.borrow_mut(),
+            &mut receiver,
+            &self.stack[l - arg_count as usize..],
+        );
         self.stack.drain((l - arg_count as usize - 1)..);
         self.stack.push(ret);
         Ok(())
@@ -442,7 +457,7 @@ impl VM {
             self.trace();
 
             #[cfg(any(debug_assert, feature = "always_gc"))]
-            self.collect_garbage();
+            self.collect_garbage(true);
 
             match self.read_opcode()? {
                 OpCode::GetUpValue => {
@@ -482,6 +497,7 @@ impl VM {
                 OpCode::Call => {
                     let arg_count = self.read_byte();
                     self.call_value(self.peek(arg_count as usize)?, arg_count)?;
+                    self.collect_garbage(false);
                 }
                 OpCode::CloseUpValue => {
                     let last: *mut Value = self.stack.last_mut().unwrap();
@@ -551,7 +567,7 @@ impl VM {
                         }
                     };
                     self.push(result);
-                    self.collect_garbage();
+                    self.collect_garbage(false);
                 }
                 OpCode::Subtract => binary_op!(self, -),
                 OpCode::Multiply => binary_op!(self, *),
@@ -616,7 +632,7 @@ impl VM {
                     debug_assert!(closure.closure().unwrap().upvalues.len() == upvalue_count);
 
                     self.push(closure);
-                    self.collect_garbage();
+                    self.collect_garbage(false);
                 }
                 OpCode::Nil => self.push(Value::Nil),
                 OpCode::True => self.push(true),
@@ -725,7 +741,7 @@ impl VM {
                         .borrow_mut()
                         .allocate_class((*class_name).to_owned());
                     self.push(class);
-                    self.collect_garbage();
+                    self.collect_garbage(false);
                 }
                 OpCode::Inherit => {
                     let superclass = self.peek(1)?;
@@ -750,9 +766,9 @@ impl VM {
         }
     }
 
-    fn collect_garbage(&mut self) {
+    fn collect_garbage(&mut self, force: bool) {
         #[cfg(not(feature = "always_gc"))]
-        if !self.allocator.borrow().should_gc() {
+        if !force && !self.allocator.borrow().should_gc() {
             return;
         }
         println!("== GC START == ");

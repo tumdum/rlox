@@ -5,13 +5,12 @@ use crate::value::{
 use std::collections::HashSet;
 use std::mem::transmute;
 
-const HEAP_GROWTH_FACTOR: usize = 2;
+const GROWTH_FACTOR: usize = 2;
 
 #[derive(Debug)]
 pub struct Allocator {
     all_objects: Vec<*mut Obj>,
-    values: HashSet<Value>,
-    bytes_allocated: usize,
+    interned: HashSet<Value>,
     next_gc: usize,
 }
 
@@ -19,9 +18,8 @@ impl Default for Allocator {
     fn default() -> Self {
         Self {
             all_objects: Default::default(),
-            values: Default::default(),
-            bytes_allocated: 0,
-            next_gc: 1024 * 1024,
+            interned: Default::default(),
+            next_gc: 128,
         }
     }
 }
@@ -29,20 +27,25 @@ impl Default for Allocator {
 impl Drop for Allocator {
     fn drop(&mut self) {
         #[cfg(feature = "alloc_logs")]
-        {
-            println!("Dropping {} objects", self.all_objects.len());
-            println!("bytes allocated: {}", self.bytes_allocated);
-        }
+        println!("Dropping {} objects", self.all_objects.len());
+
         self.free_all_objects();
     }
 }
 
 impl Allocator {
     pub fn should_gc(&self) -> bool {
-        self.next_gc <= self.bytes_allocated
+        let ret = self.next_gc <= self.all_objects.len();
+        #[cfg(feature = "alloc_logs")]
+        if ret {
+            println!("GC needed: {} <= {}", self.next_gc, self.all_objects.len());
+        }
+        ret
     }
+
     pub fn sweep(&mut self) {
-        self.values.retain(|v| v.is_reachable());
+        let objects = self.all_objects.len();
+        self.interned.retain(|v| v.is_reachable());
         self.all_objects.retain(|v| {
             let ret: bool = unsafe { &**v }.is_marked;
 
@@ -55,7 +58,10 @@ impl Allocator {
 
             ret
         });
-        self.next_gc = self.bytes_allocated * HEAP_GROWTH_FACTOR;
+        #[cfg(feature = "alloc_logs")]
+        println!("GC live objects {} -> {}", objects, self.all_objects.len());
+        assert!(self.all_objects.len() <= objects);
+        self.next_gc = objects * GROWTH_FACTOR;
     }
 
     pub fn allocate_string(&mut self, v: String) -> Value {
@@ -105,7 +111,6 @@ impl Allocator {
     }
 
     fn record_object(&mut self, obj: ObjInner, intern: bool) -> Value {
-        self.bytes_allocated += obj.size();
         let obj = Obj {
             inner: obj,
             is_marked: false,
@@ -117,11 +122,11 @@ impl Allocator {
         println!("allocated {:p}: {}", ptr, ty);
         debug_assert!(!self.all_objects.contains(&ptr));
         let value = Value::Obj(ptr);
-        if intern && self.values.contains(&value) {
-            self.values.get(&value).unwrap().clone()
+        if intern && self.interned.contains(&value) {
+            self.interned.get(&value).unwrap().clone()
         } else {
             self.all_objects.push(ptr);
-            self.values.insert(value.clone());
+            self.interned.insert(value.clone());
             value
         }
     }

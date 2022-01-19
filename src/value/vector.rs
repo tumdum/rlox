@@ -1,5 +1,5 @@
-use crate::value::{NativeMethod, Value};
 use crate::allocator::Allocator;
+use crate::value::{NativeMethod, Value};
 use std::ops::{Deref, DerefMut};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
@@ -42,7 +42,7 @@ fn rotate_left(_allocator: &mut Allocator, this: &mut Value, args: &[Value]) -> 
 }
 
 fn push(_allocator: &mut Allocator, this: &mut Value, args: &[Value]) -> Value {
-    assert!(args.len() > 0);
+    assert!(!args.is_empty());
     let v = &mut this.vector_mut().unwrap();
     v.0.extend_from_slice(args);
     Value::Nil

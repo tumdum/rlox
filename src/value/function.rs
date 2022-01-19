@@ -16,8 +16,4 @@ impl Function {
     pub fn mark(&mut self) {
         self.chunk.mark();
     }
-
-    pub fn size(&self) -> usize {
-        self.name.as_bytes().len() + self.chunk.size()
-    }
 }

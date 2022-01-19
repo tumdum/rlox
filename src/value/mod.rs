@@ -1,9 +1,9 @@
+use crate::allocator::Allocator;
 use crate::chunk::Chunk;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use thiserror::Error;
-use crate::allocator::Allocator;
 
 pub type NativeMethod = &'static dyn Fn(&mut Allocator, &mut Value, &[Value]) -> Value;
 

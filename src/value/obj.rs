@@ -10,7 +10,7 @@ pub struct Obj {
 
 impl Obj {
     pub fn mark(&mut self) {
-        #[cfg(debug_assertions)]
+        #[cfg(feature = "alloc_logs")]
         println!("marking {:p} => {:?}", self, self);
         self.is_marked = true;
         self.inner.mark();
@@ -33,7 +33,10 @@ impl DerefMut for Obj {
 impl Drop for Obj {
     fn drop(&mut self) {
         #[cfg(feature = "alloc_logs")]
-        println!("deallocated {:p}: {}", self, self.type_name());
+        match self.type_name() {
+            "string" => println!("deallocated {:p}: {} => {:?}", self, self.type_name(), self),
+            _ => println!("deallocated {:p}: {}", self, self.type_name()),
+        }
     }
 }
 

@@ -20,3 +20,5 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --features always_gc --verbose
+    - name: Run tests in release
+      run: cargo test --release --features always_gc --verbose

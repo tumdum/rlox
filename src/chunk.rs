@@ -28,10 +28,6 @@ impl Chunk {
     pub fn mark(&mut self) {
         self.constants.iter_mut().for_each(|c| c.mark());
     }
-
-    pub fn size(&self) -> usize {
-        self.code.len() + self.lines.len() * std::mem::size_of::<usize>()
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
