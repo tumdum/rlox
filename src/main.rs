@@ -11,6 +11,7 @@ use chunk::{Chunk, OpCode};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::io::{BufReader, stdout, stdin};
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
@@ -24,8 +25,8 @@ struct Opt {
 fn main() {
     let opt = Opt::from_args();
     let mut vm = VM::new(
-        Rc::new(RefCell::new(std::io::stdout())),
-        Rc::new(RefCell::new(std::io::stdin())),
+        Rc::new(RefCell::new(stdout())),
+        Rc::new(RefCell::new(BufReader::new(stdin()))),
     );
     vm.register_bulitins();
 

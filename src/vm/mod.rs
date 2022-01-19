@@ -14,6 +14,9 @@ use thiserror::Error;
 
 mod builtins;
 
+#[cfg(test)]
+mod aoc_tests;
+
 const MAX_CALL_STACK_DEPTH: usize = 1000;
 const MAX_STACK_SIZE: usize = 256;
 pub const INITIALIZER_NAME: &str = "init";
@@ -60,8 +63,8 @@ pub enum RuntimeProblem {
     UndefinedProperty(String),
     #[error("Only instances have fields, tried access fields of {0}")]
     InvalidPropertyAccess(String),
-    #[error("Only instances have mothods, tried to call method on {0}")]
-    InvalidMethodAccess(String),
+    #[error("Tried to call method '{1}' on {0} which doesn't have it")]
+    InvalidMethodAccess(String, String),
     #[error("Class {0} which has no initializer called with {1} parameters")]
     DefaultInitializerWithParameters(String, usize),
     #[error("Value operation failed: {0}")]
@@ -126,14 +129,14 @@ pub struct VM {
     globals: FxHashMap<String, Value>,
     allocator: Rc<RefCell<Allocator>>,
     output: Rc<RefCell<dyn std::io::Write>>,
-    input: Rc<RefCell<dyn std::io::Read>>,
+    input: Rc<RefCell<dyn std::io::BufRead>>,
     current_parser: Option<Parser>,
 }
 
 impl VM {
     pub fn new(
         output: Rc<RefCell<dyn std::io::Write>>,
-        input: Rc<RefCell<dyn std::io::Read>>,
+        input: Rc<RefCell<dyn std::io::BufRead>>,
     ) -> Self {
         Self {
             stack: ArrayVec::<Value, MAX_STACK_SIZE>::default(),
@@ -323,7 +326,7 @@ impl VM {
             Some(instance) => instance,
             None => {
                 return Err(self.new_runtime_error(RuntimeProblem::InvalidMethodAccess(
-                    receiver.type_name().to_owned(),
+                    receiver.type_name().to_owned(), method
                 )))
             }
         };
@@ -423,11 +426,11 @@ impl VM {
     fn call_native_method(
         &mut self,
         method: NativeMethod,
-        receiver: Value,
+        mut receiver: Value,
         arg_count: u8,
     ) -> Result<(), Error> {
         let l = self.stack.len();
-        let ret = (method)(&receiver, &self.stack[l - arg_count as usize..]);
+        let ret = (method)(&mut self.allocator.borrow_mut(), &mut receiver, &self.stack[l - arg_count as usize..]);
         self.stack.drain((l - arg_count as usize - 1)..);
         self.stack.push(ret);
         Ok(())

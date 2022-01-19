@@ -11,6 +11,18 @@ impl VM {
             }
         });
 
+        self.define_native("int", move |args| {
+            assert!(args.len() == 1);
+            let s = args[0].string().unwrap();
+            match s.parse::<f64>() {
+                Ok(v) => v.into(),
+                Err(e) => {
+                    eprintln!("Failed to parse {} to int: {}", s, e);
+                    Value::Nil
+                },
+            }
+        });
+
         let output_clone = self.output.clone();
         self.define_native("println", move |args| {
             for (i, arg) in args.iter().enumerate() {
@@ -29,9 +41,8 @@ impl VM {
         self.define_native("readln", move |args| {
             assert!(args.is_empty());
             let mut buf = String::new();
-            use std::io::BufRead;
-            use std::ops::DerefMut;
-            match std::io::BufReader::new(input.borrow_mut().deref_mut()).read_line(&mut buf) {
+            match input.borrow_mut().read_line(&mut buf) {
+                Ok(0) => Value::Nil,
                 Ok(_) => allocator.borrow_mut().allocate_string(buf),
                 Err(e) => {
                     eprintln!("readln failed: {}", e);

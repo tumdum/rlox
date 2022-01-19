@@ -1,4 +1,5 @@
 use crate::value::{NativeMethod, Value};
+use crate::allocator::Allocator;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::Deref;
 
@@ -9,14 +10,21 @@ impl ObjString {
     pub fn get_native_method(&self, name: &str) -> Option<NativeMethod> {
         match name {
             "len" => Some(&len),
+            "strip" => Some(&strip),
             _ => None,
         }
     }
 }
 
-fn len(this: &Value, args: &[Value]) -> Value {
+fn len(_allocator: &mut Allocator, this: &mut Value, args: &[Value]) -> Value {
     assert!(args.is_empty());
     (this.string().unwrap().len() as f64).into()
+}
+
+fn strip(allocator: &mut Allocator, this: &mut Value, args: &[Value]) -> Value {
+    assert!(args.is_empty());
+    let ret = this.string().unwrap().trim();
+    allocator.allocate_string(ret.to_owned())
 }
 
 impl Display for ObjString {

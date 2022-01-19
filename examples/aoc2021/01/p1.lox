@@ -1,0 +1,81 @@
+class Iter {
+    windows(n) {
+        return WindowIter(this, n);
+    }
+}
+
+class WindowIter < Iter {
+    init(other, n) {
+        this.iter = other;
+        this.n = n;
+        this.last = nil;
+    }
+
+    next() {
+        if (!this.last) {
+            var ret = vec();
+            for (var i = 0; i < this.n; i = i + 1) {
+                var tmp = this.iter.next();
+                if (tmp == nil) {
+                    return nil;
+                }
+                ret.push(tmp);
+            }
+            this.last = ret;
+            return ret;
+        }
+        this.last.rotateLeft(1);
+        var tmp = this.iter.next();
+        if (tmp == nil) {
+            return nil;
+        }
+        this.last.set(this.n-1, tmp);
+        return this.last;
+    }
+}
+
+class VecIter < Iter {
+    init(vec) {
+        this.vec = vec;
+        this.pos = 0;
+    }
+
+    next() {
+        if (this.pos < this.vec.len()) {
+            var ret = this.vec.get(this.pos);
+            this.pos = this.pos + 1;
+            return ret;
+        }
+        return nil;
+    }
+}
+
+var input = vec();
+for(var line = readln(); line != nil; line = readln()) {
+    input.push(int(line.strip()));
+}
+
+var iter = VecIter(input).windows(2);
+var part1 = 0;
+for (var pair = iter.next(); pair != nil; pair = iter.next()) {
+    if (pair.get(0) < pair.get(1)) {
+        part1 = part1 + 1;
+    }
+}
+println("part1:",part1);
+
+var triples = vec();
+var iter = VecIter(input).windows(3);
+for (var triple = iter.next(); triple != nil; triple = iter.next()) {
+    triples.push(triple.get(0) + triple.get(1) + triple.get(2));
+}
+
+var iter = VecIter(triples).windows(2);
+var part2 = 0;
+for (var pair = iter.next(); pair != nil; pair = iter.next()) {
+    if (pair.get(0) < pair.get(1)) {
+        part2 = part2 + 1;
+    }
+}
+
+println("part2:",part2);

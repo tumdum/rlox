@@ -3,8 +3,9 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use thiserror::Error;
+use crate::allocator::Allocator;
 
-pub type NativeMethod = &'static dyn Fn(&Value, &[Value]) -> Value;
+pub type NativeMethod = &'static dyn Fn(&mut Allocator, &mut Value, &[Value]) -> Value;
 
 mod closure;
 pub use closure::Closure;
@@ -118,6 +119,13 @@ impl Value {
 
     pub fn vector(&self) -> Option<&Vector> {
         if let Some(ObjInner::Vector(v)) = self.inner() {
+            return Some(v);
+        }
+        None
+    }
+
+    pub fn vector_mut(&mut self) -> Option<&mut Vector> {
+        if let Some(ObjInner::Vector(ref mut v)) = self.inner_mut() {
             return Some(v);
         }
         None

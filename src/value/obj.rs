@@ -64,8 +64,17 @@ impl Display for Obj {
                 write!(f, "<fn {}::{}@{}>", class.name, fun.name, fun.arity)
             }
             ObjInner::Vector(vec) => {
-                use itertools::Itertools;
-                write!(f, "[{}]", vec.iter().format(", "))
+                write!(f, "[")?;
+                let mut first = true;
+                for v in &vec.0 {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", v)?;
+                }
+                write!(f, "]")
             }
         }
     }
