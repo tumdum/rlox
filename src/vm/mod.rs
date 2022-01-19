@@ -827,6 +827,10 @@ impl VM {
         Ok(())
     }
 
+    pub fn load_prelude(&mut self) -> Result<(), Error> {
+        self.interpret(include_str!("./prelude.lox"))
+    }
+
     fn interpret(&mut self, source: &str) -> Result<(), Error> {
         self.current_parser = Some(Parser::new(source, self.allocator.clone()));
         let function = if let Some(function) = self.current_parser.as_mut().unwrap().compile() {

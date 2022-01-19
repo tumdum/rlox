@@ -1,0 +1,52 @@
+class Iter {
+    windows(n) {
+        return WindowIter(this, n);
+    }
+}
+
+class WindowIter < Iter {
+    init(other, n) {
+        this.iter = other;
+        this.n = n;
+        this.last = nil;
+    }
+
+    next() {
+        if (!this.last) {
+            var ret = vec();
+            for (var i = 0; i < this.n; i = i + 1) {
+                var tmp = this.iter.next();
+                if (tmp == nil) {
+                    return nil;
+                }
+                ret.push(tmp);
+            }
+            this.last = ret;
+            return ret;
+        }
+        this.last.rotateLeft(1);
+        var tmp = this.iter.next();
+        if (tmp == nil) {
+            return nil;
+        }
+        this.last.set(this.n-1, tmp);
+        return this.last;
+    }
+}
+
+class VecIter < Iter {
+    init(vec) {
+        this.vec = vec;
+        this.pos = 0;
+    }
+
+    next() {
+        if (this.pos < this.vec.len()) {
+            var ret = this.vec.get(this.pos);
+            this.pos = this.pos + 1;
+            return ret;
+        }
+        return nil;
+    }
+}
+

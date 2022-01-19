@@ -11,7 +11,10 @@ fn year_2021_day_01() {
     let input = Rc::new(RefCell::new(input));
     let mut vm = VM::new(output.clone(), input);
     vm.register_bulitins();
+    vm.load_prelude().unwrap();
+
     let got = vm.interpret(code);
+
     assert_matches!(got, Ok(_));
     let output = std::str::from_utf8(&output.borrow()).unwrap().to_owned();
     let output = output.trim();
