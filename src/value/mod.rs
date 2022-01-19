@@ -2,293 +2,38 @@ use crate::chunk::Chunk;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
-use std::rc::Rc;
 use thiserror::Error;
+
+mod closure;
+pub use closure::Closure;
+
+mod function;
+pub use function::Function;
+
+mod native_function;
+pub use native_function::NativeFunction;
+
+mod up_value;
+pub use up_value::UpValue;
+
+mod obj;
+pub use obj::Obj;
+
+mod class;
+pub use class::Class;
+
+mod obj_instance;
+pub use obj_instance::ObjInstance;
+
+mod obj_inner;
+pub use obj_inner::ObjInner;
+
+mod bound_method;
+pub use bound_method::BoundMethod;
 
 #[derive(Debug, Error)]
 pub enum Error {
     // TODO in future :)
-}
-
-#[derive(Clone, PartialEq, PartialOrd, Hash)]
-pub struct Closure {
-    pub function: Value,
-    pub upvalues: Vec<Value>,
-}
-
-impl Closure {
-    fn mark(&mut self) {
-        self.function.mark();
-        self.upvalues.iter_mut().for_each(|v| v.mark());
-    }
-
-    fn size(&self) -> usize {
-        0
-    }
-}
-
-impl Debug for Closure {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        let fun = self.function.function().unwrap();
-        write!(f, "<fn {}@{}>", fun.name, fun.arity)
-    }
-}
-
-#[derive(Clone, Default, PartialEq, PartialOrd, Hash)]
-pub struct Function {
-    pub arity: usize,
-    pub chunk: Chunk,
-    pub name: String,
-    pub upvalue_count: usize,
-}
-
-impl Function {
-    pub fn line(&self, pc: usize) -> Option<usize> {
-        self.chunk.lines.get(pc).cloned()
-    }
-
-    fn mark(&mut self) {
-        self.chunk.mark();
-    }
-
-    fn size(&self) -> usize {
-        self.name.as_bytes().len() + self.chunk.size()
-    }
-}
-
-#[derive(Clone)]
-pub struct NativeFunction {
-    pub name: String,
-    pub function: Rc<dyn Fn(&[Value]) -> Value>, // TODO: this should return a Result
-}
-
-impl Hash for NativeFunction {
-    fn hash<H: Hasher>(&self, h: &mut H) {
-        self.name.hash(h);
-        Rc::as_ptr(&self.function).hash(h);
-    }
-}
-
-impl Display for NativeFunction {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "<native fn {}>", self.name)
-    }
-}
-
-impl Debug for Function {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "<fn {}@{}>", self.name, self.arity)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
-pub struct UpValue {
-    // TODO: this could be an enum.
-    pub location: *mut Value, // This could be an index into stack
-    pub closed: Option<Value>,
-}
-
-impl UpValue {
-    fn mark(&mut self) {
-        self.closed.as_mut().iter_mut().for_each(|c| c.mark());
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
-pub struct Obj {
-    pub inner: ObjInner,
-    pub is_marked: bool,
-}
-
-impl Obj {
-    fn mark(&mut self) {
-        #[cfg(debug_assertions)]
-        println!("marking {:p} => {:?}", self, self);
-        self.is_marked = true;
-        self.inner.mark();
-    }
-}
-
-impl Deref for Obj {
-    type Target = ObjInner;
-    fn deref(&self) -> &ObjInner {
-        &self.inner
-    }
-}
-
-impl DerefMut for Obj {
-    fn deref_mut(&mut self) -> &mut ObjInner {
-        &mut self.inner
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
-pub struct Class {
-    pub name: String,
-    methods: std::collections::BTreeMap<String, Value>,
-}
-
-impl Class {
-    pub fn new(name: String) -> Self {
-        Self {
-            name,
-            methods: Default::default(),
-        }
-    }
-
-    pub fn get_method(&self, name: &str) -> Option<&Value> {
-        self.methods.get(name)
-    }
-
-    pub fn add_method(&mut self, name: &str, closure: Value) {
-        self.methods.insert(name.to_owned(), closure);
-    }
-
-    fn mark(&mut self) {
-        self.methods.values_mut().for_each(|m| m.mark());
-    }
-
-    pub fn copy_methods_to(&self, target: &mut Self) {
-        for (name, value) in &self.methods {
-            // Err is ok here since we don't wan to override existing method in
-            // subclass.
-            let _ = target.add_method(name, value.clone());
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
-pub struct ObjInstance {
-    pub class: Value,
-    // fields: FxHashMap<String, Value>, TODO: make it a hash map/faster/hashable
-    fields: std::collections::BTreeMap<String, Value>,
-}
-
-impl ObjInstance {
-    pub fn new(class: Value) -> ObjInstance {
-        Self {
-            class,
-            fields: Default::default(),
-        }
-    }
-    fn mark(&mut self) {
-        self.class.mark();
-        self.fields.values_mut().for_each(|v| v.mark());
-    }
-
-    pub fn get_field(&self, name: &str) -> Option<&Value> {
-        self.fields.get(name)
-    }
-
-    pub fn set_field(&mut self, name: String, value: Value) {
-        self.fields.insert(name, value);
-    }
-
-    fn size(&self) -> usize {
-        self.fields.keys().map(|k| k.as_bytes().len()).sum()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
-pub struct BoundMethod {
-    pub receiver: Value,
-    pub method: Value,
-}
-
-impl BoundMethod {
-    fn mark(&mut self) {
-        self.receiver.mark();
-        self.method.mark();
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
-pub enum ObjInner {
-    String(String),
-    Function(Function),
-    Closure(Closure),
-    UpValue(UpValue),
-    Class(Class),
-    ObjInstance(ObjInstance),
-    BoundMethod(BoundMethod),
-}
-
-impl ObjInner {
-    #[allow(dead_code)]
-    pub fn type_name(&self) -> &'static str {
-        match self {
-            Self::String(_) => "string",
-            Self::Function(_) => "function",
-            Self::Closure(_) => "closure",
-            Self::UpValue(_) => "upvalue",
-            Self::Class(_) => "class",
-            Self::ObjInstance(_) => "instance",
-            Self::BoundMethod(_) => "bound_method",
-        }
-    }
-
-    fn mark(&mut self) {
-        match self {
-            Self::String(_s) => {}
-            Self::Function(function) => function.mark(),
-            Self::Closure(closure) => closure.mark(),
-            Self::UpValue(upvalue) => upvalue.mark(),
-            Self::Class(class) => class.mark(),
-            Self::ObjInstance(instance) => instance.mark(),
-            Self::BoundMethod(bound_method) => bound_method.mark(),
-        }
-    }
-
-    pub fn size(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + match self {
-                Self::String(s) => s.as_bytes().len(),
-                Self::Function(f) => f.size(),
-                Self::Closure(c) => c.size(),
-                Self::UpValue(_) => 0,
-                Self::Class(_) => 0, // TODO
-                Self::ObjInstance(instance) => instance.size(),
-                Self::BoundMethod(_) => 0,
-            }
-    }
-}
-
-impl Drop for Obj {
-    fn drop(&mut self) {
-        #[cfg(feature = "alloc_logs")]
-        println!("deallocated {:p}: {}", self, self.type_name());
-    }
-}
-
-impl Display for Obj {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match &**self {
-            ObjInner::String(s) => write!(f, "{}", s),
-            ObjInner::Function(function) => function.fmt(f),
-            ObjInner::Closure(closure) => closure.function.function().unwrap().fmt(f),
-            ObjInner::UpValue(_location) => todo!(),
-            ObjInner::Class(class) => write!(f, "class {}", class.name),
-            ObjInner::ObjInstance(instance) => write!(f, "{} instance", instance.class),
-            ObjInner::BoundMethod(bound_method) => {
-                let class = &bound_method
-                    .receiver
-                    .instance()
-                    .unwrap()
-                    .class
-                    .class()
-                    .unwrap();
-                let fun = bound_method
-                    .method
-                    .closure()
-                    .unwrap()
-                    .function
-                    .function()
-                    .unwrap();
-                write!(f, "<fn {}::{}@{}>", class.name, fun.name, fun.arity)
-            }
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -373,6 +118,7 @@ impl Value {
         }
         None
     }
+
     pub fn upvalue_mut(&mut self) -> Option<&mut UpValue> {
         if let Value::Obj(ptr) = self {
             let obj: &mut Obj = unsafe { &mut **ptr };
@@ -382,6 +128,7 @@ impl Value {
         }
         None
     }
+
     pub fn upvalue(&self) -> Option<&UpValue> {
         if let Value::Obj(ptr) = self {
             let obj: &Obj = unsafe { &**ptr };
