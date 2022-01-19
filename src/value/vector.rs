@@ -81,7 +81,7 @@ fn iter(
     this: &mut Value,
     args: &[Value],
 ) -> Value {
-    let class = dbg!(globals.get("VecIter").unwrap());
+    let class = globals.get("VecIter").unwrap();
     let mut instance = allocator.allocate_obj_instance(class.clone());
     instance
         .instance_mut()

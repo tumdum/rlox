@@ -3,11 +3,66 @@ class Iter {
         return WindowIter(this, n);
     }
 
+    count() {
+        var c = 0;
+        for(var i = this.next(); i != nil; i = this.next()) {
+            c = c + 1;
+        }
+
+        return c;
+    }
+
+    map(f) {
+        return MapIter(this, f);
+    }
+
     sum() {
         var ret = 0;
         for(var i = this.next(); i != nil; i = this.next()) {
             ret = ret + i;
         }
+        return ret;
+    }
+
+    filter(pred) {
+        return FilterIter(this, pred);
+    }
+}
+
+class MapIter < Iter {
+    init(other, f) {
+        this.iter = other;
+        this.f = f;
+    }
+
+    next() {
+        var next = this.iter.next();
+        if (next == nil) {
+            return nil;
+        }
+        return this.f(next);
+    }
+}
+
+class FilterIter < Iter {
+    init(other, pred) {
+        this.iter = other;
+        this.pred = pred;
+    }
+
+    next() {
+        var ret = nil;
+
+        while (ret == nil) {
+            var next = this.iter.next();
+            if (next == nil) {
+                return nil;
+            }
+            if (this.pred(next)) {
+                ret = next;
+            }
+        }
+
         return ret;
     }
 }

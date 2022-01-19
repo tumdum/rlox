@@ -14,8 +14,8 @@ impl VM {
         self.define_native("int", move |args| {
             assert!(args.len() == 1);
             let s = args[0].string().unwrap();
-            match s.parse::<f64>() {
-                Ok(v) => v.into(),
+            match s.parse::<i64>() {
+                Ok(v) => (v as f64).into(),
                 Err(e) => {
                     eprintln!("Failed to parse {} to int: {}", s, e);
                     Value::Nil

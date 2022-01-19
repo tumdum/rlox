@@ -1,29 +1,13 @@
+fun less(v) { return v.get(0) < v.get(1); }
+fun sum(v)  { return v.iter().sum(); }
+
 var input = vec();
 for(var line = readln(); line != nil; line = readln()) {
     input.push(int(line.strip()));
 }
 
-var iter = input.iter().windows(2);
-var part1 = 0;
-for (var pair = iter.next(); pair != nil; pair = iter.next()) {
-    if (pair.get(0) < pair.get(1)) {
-        part1 = part1 + 1;
-    }
-}
+var part1 = input.iter().windows(2).filter(less).count();
 println("part1:",part1);
 
-var triples = vec();
-var iter = input.iter().windows(3);
-for (var triple = iter.next(); triple != nil; triple = iter.next()) {
-    triples.push(triple.iter().sum());
-}
-
-var iter = triples.iter().windows(2);
-var part2 = 0;
-for (var pair = iter.next(); pair != nil; pair = iter.next()) {
-    if (pair.get(0) < pair.get(1)) {
-        part2 = part2 + 1;
-    }
-}
-
+var part2 = input.iter().windows(3).map(sum).windows(2).filter(less).count();
 println("part2:",part2);

@@ -772,9 +772,11 @@ impl VM {
         if !force && !self.allocator.borrow().should_gc() {
             return;
         }
+        #[cfg(feature = "trace")]
         println!("== GC START == ");
         self.mark_roots();
         self.sweep();
+        #[cfg(feature = "trace")]
         println!("==  GC END  == ");
     }
 
