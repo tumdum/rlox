@@ -1,8 +1,10 @@
-use crate::value::{NativeMethod, Vector, BoundMethod, Class, Closure, Function, ObjInstance, UpValue};
+use crate::value::{
+    BoundMethod, Class, Closure, Function, NativeMethod, ObjInstance, ObjString, UpValue, Vector,
+};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub enum ObjInner {
-    String(String),
+    String(ObjString),
     Function(Function),
     Closure(Closure),
     UpValue(UpValue),
@@ -57,6 +59,7 @@ impl ObjInner {
     pub fn get_native_method(&self, name: &str) -> Option<NativeMethod> {
         match self {
             Self::Vector(v) => v.get_native_method(name),
+            Self::String(v) => v.get_native_method(name),
             _ => None,
         }
     }

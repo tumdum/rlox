@@ -24,6 +24,22 @@ impl VM {
             Value::Nil
         });
 
+        let input = self.input.clone();
+        let allocator = self.allocator.clone();
+        self.define_native("readln", move |args| {
+            assert!(args.is_empty());
+            let mut buf = String::new();
+            use std::io::BufRead;
+            use std::ops::DerefMut;
+            match std::io::BufReader::new(input.borrow_mut().deref_mut()).read_line(&mut buf) {
+                Ok(_) => allocator.borrow_mut().allocate_string(buf),
+                Err(e) => {
+                    eprintln!("readln failed: {}", e);
+                    Value::Nil
+                }
+            }
+        });
+
         let allocator = self.allocator.clone();
         self.define_native("vec", move |args| {
             allocator.borrow_mut().allocate_vector(args.to_vec())

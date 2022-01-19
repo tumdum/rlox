@@ -1,5 +1,5 @@
-use crate::value::{NativeMethod,Value};
-use std::ops::{DerefMut, Deref};
+use crate::value::{NativeMethod, Value};
+use std::ops::{Deref, DerefMut};
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Hash)]
 pub struct Vector(pub Vec<Value>);
@@ -33,7 +33,6 @@ impl Deref for Vector {
 }
 
 impl DerefMut for Vector {
-
     fn deref_mut(&mut self) -> &mut [Value] {
         &mut self.0
     }

@@ -1,5 +1,6 @@
 use crate::value::{
-    Vector, BoundMethod, Class, Closure, Function, Obj, ObjInner, ObjInstance, UpValue, Value,
+    BoundMethod, Class, Closure, Function, Obj, ObjInner, ObjInstance, ObjString, UpValue, Value,
+    Vector,
 };
 use std::collections::HashSet;
 use std::mem::transmute;
@@ -58,7 +59,7 @@ impl Allocator {
     }
 
     pub fn allocate_string(&mut self, v: String) -> Value {
-        let obj = ObjInner::String(v);
+        let obj = ObjInner::String(ObjString(v));
         self.record_object(obj, true)
     }
 

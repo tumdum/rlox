@@ -23,7 +23,10 @@ struct Opt {
 
 fn main() {
     let opt = Opt::from_args();
-    let mut vm = VM::new(Rc::new(RefCell::new(std::io::stdout())));
+    let mut vm = VM::new(
+        Rc::new(RefCell::new(std::io::stdout())),
+        Rc::new(RefCell::new(std::io::stdin())),
+    );
     vm.register_bulitins();
 
     let result = match opt.script {

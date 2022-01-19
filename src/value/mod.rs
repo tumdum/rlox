@@ -4,7 +4,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use thiserror::Error;
 
-pub type NativeMethod = &'static dyn Fn(&Value, &[Value])->Value;
+pub type NativeMethod = &'static dyn Fn(&Value, &[Value]) -> Value;
 
 mod closure;
 pub use closure::Closure;
@@ -35,6 +35,9 @@ pub use bound_method::BoundMethod;
 
 mod vector;
 pub use vector::Vector;
+
+mod string;
+pub use string::ObjString;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -92,7 +95,7 @@ impl Value {
         }
     }
 
-    pub fn string(&self) -> Option<&str> {
+    pub fn string(&self) -> Option<&ObjString> {
         if let Some(ObjInner::String(s)) = self.inner() {
             return Some(s);
         }
@@ -101,7 +104,7 @@ impl Value {
 
     pub fn function_mut(&mut self) -> Option<&mut Function> {
         if let Some(ObjInner::Function(ref mut f)) = self.inner_mut() {
-            return Some(f)
+            return Some(f);
         }
         None
     }
@@ -129,7 +132,7 @@ impl Value {
 
     pub fn closure_mut(&mut self) -> Option<&mut Closure> {
         if let Some(ObjInner::Closure(ref mut c)) = self.inner_mut() {
-            return Some(c)
+            return Some(c);
         }
         None
     }
@@ -143,7 +146,7 @@ impl Value {
 
     pub fn upvalue_mut(&mut self) -> Option<&mut UpValue> {
         if let Some(ObjInner::UpValue(ref mut v)) = self.inner_mut() {
-            return Some(v)
+            return Some(v);
         }
         None
     }
@@ -157,7 +160,7 @@ impl Value {
 
     pub fn class_mut(&mut self) -> Option<&mut Class> {
         if let Some(ObjInner::Class(ref mut c)) = self.inner_mut() {
-            return Some(c)
+            return Some(c);
         }
         None
     }
@@ -171,7 +174,7 @@ impl Value {
 
     pub fn instance_mut(&mut self) -> Option<&mut ObjInstance> {
         if let Some(ObjInner::ObjInstance(ref mut v)) = self.inner_mut() {
-            return Some(v)
+            return Some(v);
         }
         None
     }
