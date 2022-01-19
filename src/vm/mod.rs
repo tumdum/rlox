@@ -1551,6 +1551,15 @@ x.finish("test");
         );
         test_eval!("class Foo {} var x = Foo(); x.y = Foo(); x.y.z = vec(1,2); println(x.y.z[0], x.y.z[1]);", "1 2");
         test_eval!("class Foo {} var x = vec(Foo(), Foo()); x[0].y = 1; x[1].z = 2; println(x[1].z, x[0].y);", "2 1");
+        test_eval!(
+            "var x = vec(1, 2); x[0] = 42; x[1] = 1337; println(x);",
+            "[42, 1337]"
+        );
+        test_eval!("class Foo {} var x = Foo(); x.y = Foo(); x.y.z = vec(3,4); x.y.z[0] = 1; x.y.z[1] = 2; println(x.y.z[0], x.y.z[1]);", "1 2");
+        test_eval!(
+            "var x = vec(vec(1, 2), vec(3,4)); x[0][0] = 100; println(x);",
+            "[[100, 2], [3, 4]]"
+        );
     }
 
     #[test]

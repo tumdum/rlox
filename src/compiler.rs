@@ -693,16 +693,24 @@ impl Parser {
         self.emit_bytes(OpCode::Call as u8, arg_count);
     }
 
-    fn index(&mut self, _can_assign: bool) {
+    fn index(&mut self, can_assign: bool) {
         self.expression();
         self.consume(
             TokenType::RightBracket,
             "Expected ']' after index expression",
         );
-        let token = self.synthetic_token("getByIndex");
-        let name = self.identifier_constant(&token);
-        self.emit_bytes(OpCode::Invoke as u8, name);
-        self.emit_byte(1);
+        if can_assign && self.match_token(TokenType::Equal) {
+            self.expression();
+            let token = self.synthetic_token("setByIndex");
+            let name = self.identifier_constant(&token);
+            self.emit_bytes(OpCode::Invoke as u8, name);
+            self.emit_byte(2);
+        } else {
+            let token = self.synthetic_token("getByIndex");
+            let name = self.identifier_constant(&token);
+            self.emit_bytes(OpCode::Invoke as u8, name);
+            self.emit_byte(1);
+        }
     }
 
     fn dot(&mut self, can_assign: bool) {
