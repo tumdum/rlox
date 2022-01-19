@@ -11,7 +11,9 @@ impl Vector {
         match name {
             "len" => Some(&len),
             "get" => Some(&get),
+            "getByIndex" => Some(&get),
             "set" => Some(&set),
+            "setByIndex" => Some(&set),
             "push" => Some(&push),
             "iter" => Some(&iter),
             "rotateLeft" => Some(&rotate_left),
@@ -79,7 +81,7 @@ fn iter(
     globals: &FxHashMap<String, Value>,
     allocator: &mut Allocator,
     this: &mut Value,
-    args: &[Value],
+    _args: &[Value],
 ) -> Value {
     let class = globals.get("VecIter").unwrap();
     let mut instance = allocator.allocate_obj_instance(class.clone());

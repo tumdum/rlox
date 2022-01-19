@@ -1,4 +1,4 @@
-fun less(v) { return v.get(0) < v.get(1); }
+fun less(v) { return v[0] < v[1]; }
 fun sum(v)  { return v.iter().sum(); }
 
 var input = vec();
