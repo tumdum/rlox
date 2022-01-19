@@ -16,6 +16,8 @@ static RULES: Lazy<HashMap<TokenType, ParseRule>> = Lazy::new(|| {
        TokenType::RightParen     => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::LeftBrace      => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::RightBrace     => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
+       TokenType::LeftBracket    => ParseRule{prefix: None,                    infix: Some(&Parser::index),  precedence: Precedence::Call},
+       TokenType::RightBracket   => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Comma          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Dot            => ParseRule{prefix: None,                    infix: Some(&Parser::dot),    precedence: Precedence::Call},
        TokenType::Minus          => ParseRule{prefix: Some(&Parser::unary),    infix: Some(&Parser::binary), precedence: Precedence::Term},
@@ -689,6 +691,18 @@ impl Parser {
     fn call(&mut self, _can_assign: bool) {
         let arg_count = self.argument_list();
         self.emit_bytes(OpCode::Call as u8, arg_count);
+    }
+
+    fn index(&mut self, _can_assign: bool) {
+        self.expression();
+        self.consume(
+            TokenType::RightBracket,
+            "Expected ']' after index expression",
+        );
+        let token = self.synthetic_token("getByIndex");
+        let name = self.identifier_constant(&token);
+        self.emit_bytes(OpCode::Invoke as u8, name);
+        self.emit_byte(1);
     }
 
     fn dot(&mut self, can_assign: bool) {

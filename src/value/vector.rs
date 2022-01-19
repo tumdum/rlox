@@ -11,6 +11,7 @@ impl Vector {
         match name {
             "len" => Some(&len),
             "get" => Some(&get),
+            "getByIndex" => Some(&get),
             "set" => Some(&set),
             "push" => Some(&push),
             "iter" => Some(&iter),
