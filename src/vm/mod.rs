@@ -442,6 +442,7 @@ impl VM {
     ) -> Result<(), Error> {
         let l = self.stack.len();
         let ret = (method)(
+            &self.globals,
             &mut self.allocator.borrow_mut(),
             &mut receiver,
             &self.stack[l - arg_count as usize..],
@@ -1098,6 +1099,7 @@ print fact(11);"#,
         let output = Rc::new(RefCell::new(vec![]));
         let input = Rc::new(RefCell::new([].as_slice()));
         let mut vm = VM::new(output.clone(), input);
+        vm.load_prelude().unwrap();
         vm.register_bulitins();
         let got = vm.interpret(
             r#"

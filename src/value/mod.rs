@@ -1,11 +1,13 @@
 use crate::allocator::Allocator;
 use crate::chunk::Chunk;
+use fxhash::FxHashMap;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use thiserror::Error;
 
-pub type NativeMethod = &'static dyn Fn(&mut Allocator, &mut Value, &[Value]) -> Value;
+pub type NativeMethod =
+    &'static dyn Fn(&FxHashMap<String, Value>, &mut Allocator, &mut Value, &[Value]) -> Value;
 
 mod closure;
 pub use closure::Closure;

@@ -2,6 +2,14 @@ class Iter {
     windows(n) {
         return WindowIter(this, n);
     }
+
+    sum() {
+        var ret = 0;
+        for(var i = this.next(); i != nil; i = this.next()) {
+            ret = ret + i;
+        }
+        return ret;
+    }
 }
 
 class WindowIter < Iter {

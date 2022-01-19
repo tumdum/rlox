@@ -3,7 +3,7 @@ for(var line = readln(); line != nil; line = readln()) {
     input.push(int(line.strip()));
 }
 
-var iter = VecIter(input).windows(2);
+var iter = input.iter().windows(2);
 var part1 = 0;
 for (var pair = iter.next(); pair != nil; pair = iter.next()) {
     if (pair.get(0) < pair.get(1)) {
@@ -13,12 +13,12 @@ for (var pair = iter.next(); pair != nil; pair = iter.next()) {
 println("part1:",part1);
 
 var triples = vec();
-var iter = VecIter(input).windows(3);
+var iter = input.iter().windows(3);
 for (var triple = iter.next(); triple != nil; triple = iter.next()) {
-    triples.push(triple.get(0) + triple.get(1) + triple.get(2));
+    triples.push(triple.iter().sum());
 }
 
-var iter = VecIter(triples).windows(2);
+var iter = triples.iter().windows(2);
 var part2 = 0;
 for (var pair = iter.next(); pair != nil; pair = iter.next()) {
     if (pair.get(0) < pair.get(1)) {

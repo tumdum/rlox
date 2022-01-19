@@ -28,8 +28,9 @@ fn main() {
         Rc::new(RefCell::new(stdout())),
         Rc::new(RefCell::new(BufReader::new(stdin()))),
     );
-    vm.register_bulitins();
+
     vm.load_prelude().unwrap();
+    vm.register_bulitins();
 
     let result = match opt.script {
         None => vm.repl(),

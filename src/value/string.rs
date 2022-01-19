@@ -1,5 +1,6 @@
 use crate::allocator::Allocator;
 use crate::value::{NativeMethod, Value};
+use fxhash::FxHashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::Deref;
 
@@ -16,12 +17,22 @@ impl ObjString {
     }
 }
 
-fn len(_allocator: &mut Allocator, this: &mut Value, args: &[Value]) -> Value {
+fn len(
+    _globals: &FxHashMap<String, Value>,
+    _allocator: &mut Allocator,
+    this: &mut Value,
+    args: &[Value],
+) -> Value {
     assert!(args.is_empty());
     (this.string().unwrap().len() as f64).into()
 }
 
-fn strip(allocator: &mut Allocator, this: &mut Value, args: &[Value]) -> Value {
+fn strip(
+    _globals: &FxHashMap<String, Value>,
+    allocator: &mut Allocator,
+    this: &mut Value,
+    args: &[Value],
+) -> Value {
     assert!(args.is_empty());
     let ret = this.string().unwrap().trim();
     allocator.allocate_string(ret.to_owned())
