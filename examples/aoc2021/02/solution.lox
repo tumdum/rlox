@@ -1,0 +1,57 @@
+class Move {
+    init(dir, val) {
+        this.dir = dir;
+        this.val = int(val);
+    }
+}
+var input = vec();
+for(var line = readln(); line != nil; line = readln()) {
+    var c = line.strip().split(" ");
+    input.push(Move(c[0], c[1]));
+}
+
+class Pos {
+    init(h, d, aim) {
+        this.h = h;
+        this.d = d;
+        this.aim = aim;
+    }
+
+    applyMove(move) {
+        if (move.dir == "up") {
+            return Pos(this.h, this.d - move.val, this.aim);
+        }
+        if (move.dir == "down") {
+            return Pos(this.h, this.d + move.val, this.aim);
+        }
+        if (move.dir == "forward") {
+            return Pos(this.h + move.val, this.d, this.aim);
+        }
+    }
+
+    applyMove2(move) {
+        if (move.dir == "up") {
+            return Pos(this.h, this.d, this.aim - move.val);
+        }
+        if (move.dir == "down") {
+            return Pos(this.h, this.d, this.aim + move.val);
+        }
+        if (move.dir == "forward") {
+            return Pos(
+                this.h + move.val,
+                this.d + this.aim * move.val, 
+                this.aim);
+        }
+    }
+}
+
+var pos = Pos(0,0,0);
+for (move in input) {
+    pos = pos.applyMove(move);
+}
+println("part1:", pos.h * pos.d);
+var pos = Pos(0,0,0);
+for (move in input) {
+    pos = pos.applyMove2(move);
+}
+println("part2:", pos.h * pos.d);
