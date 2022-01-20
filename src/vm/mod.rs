@@ -1561,6 +1561,7 @@ x.finish("test");
             "var x = vec(vec(1, 2), vec(3,4)); x[0][0] = 100; println(x);",
             "[[100, 2], [3, 4]]"
         );
+        // TODO: test_eval!("var x = vec(); var l = x.len; println(l());", "0");
     }
 
     #[test]
@@ -1609,5 +1610,25 @@ x.finish("test");
                 println(i*j);
             }
         }"#, "5\n6\n10\n12\n15\n18\n20\n24");
+        test_eval!(r#"
+        var y = vec(vec(1,3,5,7), vec(5,6));
+        for (i in y[0]) {
+            for (j in y[1]) {
+                println(i*j);
+            }
+        }"#, "5\n6\n15\n18\n25\n30\n35\n42");
+        test_eval!(r#"
+        var y = vec(vec(1,3,5,7), vec(5,6));
+        for (i in y[0]) {
+            for (j in y[1]) {
+                i = 0;
+                j = 0;
+            }
+        }
+        for (i in y[0]) {
+            for (j in y[1]) {
+                println(i*j);
+            }
+        }"#, "5\n6\n15\n18\n25\n30\n35\n42");
     }
 }

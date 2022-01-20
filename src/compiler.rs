@@ -216,11 +216,18 @@ impl Parser {
             next_unique_id: Default::default(),
         }
     }
-    
+
     fn unique_synthetic_token(&mut self, prefix: &str) -> Token {
         let name = format!("{}-{}", prefix, self.next_unique_id);
         self.next_unique_id += 1;
         self.synthetic_token(&name)
+    }
+
+    fn add_new_unique_local(&mut self, name_prefix: &str) -> (Token, u8) {
+        let token = self.unique_synthetic_token(name_prefix);
+        self.add_local(token.clone());
+        let id = self.identifier_constant(&token);
+        (token, id)
     }
 
     pub fn mark(&mut self) {
@@ -261,68 +268,7 @@ impl Parser {
         } else if self.match_token(TokenType::Var) {
             self.var_declaration();
         } else if self.match_token(TokenType::Identifier) {
-            let iter_var_name : Token = self.previous.as_ref().unwrap().clone();
-            let name_constant = self.identifier_constant(&iter_var_name);
-            if self.match_token(TokenType::In) {
-                // Fake variable pointing to collection iterated over
-                let token = self.unique_synthetic_token("collection_tmp");
-                self.add_local(token.clone());
-                let token_id = self.identifier_constant(&token);
-                self.expression();
-                self.define_variable(token_id);
-                let mut collection_tmp_id =
-                    self.resolve_local(self.compilers.len() - 1, &token);
-                self.match_token(TokenType::RightParen);
-
-                // Fake iterator iterating over fake collection
-                let iter_token = self.unique_synthetic_token("iter_tmp");
-                self.add_local(iter_token.clone());
-                let iter_token_id = self.identifier_constant(&iter_token);
-                self.emit_bytes(OpCode::GetLocal as u8, collection_tmp_id as u8);
-                let iter_method_token = self.synthetic_token("iter");
-                let iter_method_id = self.identifier_constant(&iter_method_token);
-                self.emit_bytes(OpCode::Invoke as u8, iter_method_id);
-                self.emit_byte(0);
-                self.define_variable(iter_token_id);
-                let mut iter_tmp_id =
-                    self.resolve_local(self.compilers.len() - 1, &iter_token);
-
-                // Iteration variable
-                self.add_local(iter_var_name.clone());
-                self.emit_bytes(OpCode::GetLocal as u8, iter_tmp_id as u8);
-                let next_method_token = self.synthetic_token("next");
-                let next_method_id = self.identifier_constant(&next_method_token);
-                self.emit_bytes(OpCode::Invoke as u8, next_method_id);
-                self.emit_byte(0);
-                self.define_variable(name_constant);
-                let mut iter_var_id =
-                    self.resolve_local(self.compilers.len() - 1, &iter_var_name);
-
-                // -2 to adjust for the bytecode for the jump offset itself
-                let loop_start = self.current_chunk().code.len();
-
-                self.statement();
-
-                // Update iteration var...
-                self.emit_bytes(OpCode::GetLocal as u8, iter_tmp_id as u8);
-                self.emit_bytes(OpCode::Invoke as u8, next_method_id);
-                self.emit_byte(0);
-                self.emit_bytes(OpCode::SetLocal as u8, iter_var_id as u8);
-                self.emit_byte(OpCode::Pop as u8);
-                // and check if it equals nil
-                self.emit_bytes(OpCode::GetLocal as u8, iter_var_id as u8);
-                self.emit_byte(OpCode::Nil as u8);
-                self.emit_bytes(OpCode::Equal as u8, OpCode::Not as u8);
-
-                let end_jump = self.emit_jump(OpCode::JumpIfFalse as u8);
-                self.emit_byte(OpCode::Pop as u8); // condition
-                self.emit_loop(loop_start);
-                self.patch_jump(end_jump);
-                self.emit_byte(OpCode::Pop as u8); // condition
-
-                self.end_scope();
-                return;
-            }
+            return self.for_in_statement();
         } else {
             self.expression_statement();
         }
@@ -360,6 +306,63 @@ impl Parser {
         }
 
         self.end_scope();
+    }
+
+    fn for_in_statement(&mut self) {
+        let iter_var_name: Token = self.previous.as_ref().unwrap().clone();
+        let name_constant = self.identifier_constant(&iter_var_name);
+        self.consume(TokenType::In, "Expect 'in' after identifier in for");
+
+        // Fake variable pointing to collection iterated over
+        let (token, token_id) = self.add_new_unique_local("collection_tmp");
+        self.expression();
+        self.define_variable(token_id);
+        let collection_tmp_id = self.resolve_local(self.compilers.len() - 1, &token);
+        self.match_token(TokenType::RightParen);
+
+        // Fake iterator iterating over fake collection
+        let (iter_token, iter_token_id) = self.add_new_unique_local("iter_tmp");
+        self.emit_bytes(OpCode::GetLocal as u8, collection_tmp_id as u8);
+        let iter_method_token = self.synthetic_token("iter");
+        let iter_method_id = self.identifier_constant(&iter_method_token);
+        self.emit_bytes(OpCode::Invoke as u8, iter_method_id);
+        self.emit_byte(0);
+        self.define_variable(iter_token_id);
+        let iter_tmp_id = self.resolve_local(self.compilers.len() - 1, &iter_token);
+
+        // Iteration variable
+        self.add_local(iter_var_name.clone());
+        self.emit_bytes(OpCode::GetLocal as u8, iter_tmp_id as u8);
+        let next_method_token = self.synthetic_token("next");
+        let next_method_id = self.identifier_constant(&next_method_token);
+        self.emit_bytes(OpCode::Invoke as u8, next_method_id);
+        self.emit_byte(0);
+        self.define_variable(name_constant);
+        let iter_var_id = self.resolve_local(self.compilers.len() - 1, &iter_var_name);
+
+        let loop_start = self.current_chunk().code.len();
+
+        self.statement();
+
+        // Update iteration var...
+        self.emit_bytes(OpCode::GetLocal as u8, iter_tmp_id as u8);
+        self.emit_bytes(OpCode::Invoke as u8, next_method_id);
+        self.emit_byte(0);
+        self.emit_bytes(OpCode::SetLocal as u8, iter_var_id as u8);
+        self.emit_byte(OpCode::Pop as u8);
+        // and check if it equals nil
+        self.emit_bytes(OpCode::GetLocal as u8, iter_var_id as u8);
+        self.emit_byte(OpCode::Nil as u8);
+        self.emit_bytes(OpCode::Equal as u8, OpCode::Not as u8);
+
+        let end_jump = self.emit_jump(OpCode::JumpIfFalse as u8);
+        self.emit_byte(OpCode::Pop as u8); // condition
+        self.emit_loop(loop_start);
+        self.patch_jump(end_jump);
+        self.emit_byte(OpCode::Pop as u8); // condition
+
+        self.end_scope();
+        return;
     }
 
     fn if_statement(&mut self) {
