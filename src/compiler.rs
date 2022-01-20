@@ -362,7 +362,6 @@ impl Parser {
         self.emit_byte(OpCode::Pop as u8); // condition
 
         self.end_scope();
-        return;
     }
 
     fn if_statement(&mut self) {

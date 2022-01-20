@@ -1281,7 +1281,7 @@ globalTwo();
     #[test]
     fn classes() {
         test_eval!("class Foo {} print Foo;", "class Foo");
-        test_eval!("class Foo {} print Foo();", "class Foo instance");
+        test_eval!("class Foo {} print Foo();", "Foo{}");
         test_eval!(
             r#"
         class Toast {}
@@ -1340,7 +1340,7 @@ class Nested {
 }
 
 Nested().method();"#,
-            "class Nested instance"
+            "Nested{}"
         );
         test_eval!(
             r#"
@@ -1571,7 +1571,8 @@ x.finish("test");
 
     #[test]
     fn for_in_loop() {
-        test_eval!(r#"
+        test_eval!(
+            r#"
         {
             var x = vec(1,2,3);
             var collection_tmp = x;
@@ -1579,13 +1580,19 @@ x.finish("test");
             for (var i = iter.next(); i != nil; i = iter.next()) {
                 println(i);
             }
-        }"#, "1\n2\n3");
-        test_eval!(r#"
+        }"#,
+            "1\n2\n3"
+        );
+        test_eval!(
+            r#"
         var x = vec(1,2);
         for (i in x) { 
             println(i); 
-        }"#, "1\n2");
-        test_eval!(r#"
+        }"#,
+            "1\n2"
+        );
+        test_eval!(
+            r#"
         var x = vec(1,2,3);
         for (i in x) { 
             println(i); 
@@ -1593,31 +1600,43 @@ x.finish("test");
         for (i in x) { 
             println(i+7); 
         }
-        "#, "1\n2\n3\n8\n9\n10");
-        test_eval!(r#"
+        "#,
+            "1\n2\n3\n8\n9\n10"
+        );
+        test_eval!(
+            r#"
         var x = vec(1,2,3);
         for (i in x) {
             for (j in x) {
                 println(i*j);
             }
         }
-        "#, "1\n2\n3\n2\n4\n6\n3\n6\n9");
-        test_eval!(r#"
+        "#,
+            "1\n2\n3\n2\n4\n6\n3\n6\n9"
+        );
+        test_eval!(
+            r#"
         var x = vec(1,2,3,4);
         var y = vec(5,6);
         for (i in x) {
             for (j in y) {
                 println(i*j);
             }
-        }"#, "5\n6\n10\n12\n15\n18\n20\n24");
-        test_eval!(r#"
+        }"#,
+            "5\n6\n10\n12\n15\n18\n20\n24"
+        );
+        test_eval!(
+            r#"
         var y = vec(vec(1,3,5,7), vec(5,6));
         for (i in y[0]) {
             for (j in y[1]) {
                 println(i*j);
             }
-        }"#, "5\n6\n15\n18\n25\n30\n35\n42");
-        test_eval!(r#"
+        }"#,
+            "5\n6\n15\n18\n25\n30\n35\n42"
+        );
+        test_eval!(
+            r#"
         var y = vec(vec(1,3,5,7), vec(5,6));
         for (i in y[0]) {
             for (j in y[1]) {
@@ -1629,6 +1648,8 @@ x.finish("test");
             for (j in y[1]) {
                 println(i*j);
             }
-        }"#, "5\n6\n15\n18\n25\n30\n35\n42");
+        }"#,
+            "5\n6\n15\n18\n25\n30\n35\n42"
+        );
     }
 }

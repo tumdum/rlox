@@ -48,7 +48,8 @@ impl Display for Obj {
             ObjInner::Closure(closure) => closure.function.function().unwrap().fmt(f),
             ObjInner::UpValue(_location) => todo!(),
             ObjInner::Class(class) => write!(f, "class {}", class.name),
-            ObjInner::ObjInstance(instance) => write!(f, "{} instance", instance.class),
+            // ObjInner::ObjInstance(instance) => write!(f, "{} instance", instance.class),
+            ObjInner::ObjInstance(instance) => std::fmt::Display::fmt(instance, f),
             ObjInner::BoundMethod(bound_method) => {
                 let class = &bound_method
                     .receiver
