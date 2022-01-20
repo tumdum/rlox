@@ -237,7 +237,7 @@ impl VM {
         for v in &self.stack {
             println!("            {:?}", v);
         }
-        println!("   globals: {:?}", self.globals);
+        // println!("   globals: {:?}", self.globals);
         println!("    frames: {:?}", self.frames);
         self.current_frame()
             .function()
@@ -862,6 +862,7 @@ mod tests {
             let input: &[u8] = &[];
             let input = Rc::new(RefCell::new(input));
             let mut vm = VM::new(output.clone(), input);
+            vm.load_prelude().unwrap();
             vm.register_bulitins();
             let got = vm.interpret(&format!("{}", $input));
             assert_matches!(got, Ok(_));
@@ -1565,5 +1566,48 @@ x.finish("test");
     #[test]
     fn string() {
         test_eval!("println(\"foo\".len());", "3");
+    }
+
+    #[test]
+    fn for_in_loop() {
+        test_eval!(r#"
+        {
+            var x = vec(1,2,3);
+            var collection_tmp = x;
+            var iter = collection_tmp.iter();
+            for (var i = iter.next(); i != nil; i = iter.next()) {
+                println(i);
+            }
+        }"#, "1\n2\n3");
+        test_eval!(r#"
+        var x = vec(1,2);
+        for (i in x) { 
+            println(i); 
+        }"#, "1\n2");
+        test_eval!(r#"
+        var x = vec(1,2,3);
+        for (i in x) { 
+            println(i); 
+        }
+        for (i in x) { 
+            println(i+7); 
+        }
+        "#, "1\n2\n3\n8\n9\n10");
+        test_eval!(r#"
+        var x = vec(1,2,3);
+        for (i in x) {
+            for (j in x) {
+                println(i*j);
+            }
+        }
+        "#, "1\n2\n3\n2\n4\n6\n3\n6\n9");
+        test_eval!(r#"
+        var x = vec(1,2,3,4);
+        var y = vec(5,6);
+        for (i in x) {
+            for (j in y) {
+                println(i*j);
+            }
+        }"#, "5\n6\n10\n12\n15\n18\n20\n24");
     }
 }

@@ -43,6 +43,7 @@ static RULES: Lazy<HashMap<TokenType, ParseRule>> = Lazy::new(|| {
        TokenType::For            => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Fun            => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::If             => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
+       TokenType::In             => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
        TokenType::Nil            => ParseRule{prefix: Some(&Parser::literal),  infix: None,                  precedence: Precedence::None},
        TokenType::Or             => ParseRule{prefix: None,                    infix: Some(&Parser::or),     precedence: Precedence::Or},
        TokenType::Print          => ParseRule{prefix: None,                    infix: None,                  precedence: Precedence::None},
@@ -196,6 +197,7 @@ pub struct Parser {
     previous: Option<Token>,
     had_error: RefCell<bool>,
     panic_mode: RefCell<bool>,
+    next_unique_id: usize,
 }
 
 impl Parser {
@@ -211,7 +213,14 @@ impl Parser {
             previous: None,
             had_error: RefCell::new(false),
             panic_mode: RefCell::new(false),
+            next_unique_id: Default::default(),
         }
+    }
+    
+    fn unique_synthetic_token(&mut self, prefix: &str) -> Token {
+        let name = format!("{}-{}", prefix, self.next_unique_id);
+        self.next_unique_id += 1;
+        self.synthetic_token(&name)
     }
 
     pub fn mark(&mut self) {
@@ -251,6 +260,69 @@ impl Parser {
             // No initializer
         } else if self.match_token(TokenType::Var) {
             self.var_declaration();
+        } else if self.match_token(TokenType::Identifier) {
+            let iter_var_name : Token = self.previous.as_ref().unwrap().clone();
+            let name_constant = self.identifier_constant(&iter_var_name);
+            if self.match_token(TokenType::In) {
+                // Fake variable pointing to collection iterated over
+                let token = self.unique_synthetic_token("collection_tmp");
+                self.add_local(token.clone());
+                let token_id = self.identifier_constant(&token);
+                self.expression();
+                self.define_variable(token_id);
+                let mut collection_tmp_id =
+                    self.resolve_local(self.compilers.len() - 1, &token);
+                self.match_token(TokenType::RightParen);
+
+                // Fake iterator iterating over fake collection
+                let iter_token = self.unique_synthetic_token("iter_tmp");
+                self.add_local(iter_token.clone());
+                let iter_token_id = self.identifier_constant(&iter_token);
+                self.emit_bytes(OpCode::GetLocal as u8, collection_tmp_id as u8);
+                let iter_method_token = self.synthetic_token("iter");
+                let iter_method_id = self.identifier_constant(&iter_method_token);
+                self.emit_bytes(OpCode::Invoke as u8, iter_method_id);
+                self.emit_byte(0);
+                self.define_variable(iter_token_id);
+                let mut iter_tmp_id =
+                    self.resolve_local(self.compilers.len() - 1, &iter_token);
+
+                // Iteration variable
+                self.add_local(iter_var_name.clone());
+                self.emit_bytes(OpCode::GetLocal as u8, iter_tmp_id as u8);
+                let next_method_token = self.synthetic_token("next");
+                let next_method_id = self.identifier_constant(&next_method_token);
+                self.emit_bytes(OpCode::Invoke as u8, next_method_id);
+                self.emit_byte(0);
+                self.define_variable(name_constant);
+                let mut iter_var_id =
+                    self.resolve_local(self.compilers.len() - 1, &iter_var_name);
+
+                // -2 to adjust for the bytecode for the jump offset itself
+                let loop_start = self.current_chunk().code.len();
+
+                self.statement();
+
+                // Update iteration var...
+                self.emit_bytes(OpCode::GetLocal as u8, iter_tmp_id as u8);
+                self.emit_bytes(OpCode::Invoke as u8, next_method_id);
+                self.emit_byte(0);
+                self.emit_bytes(OpCode::SetLocal as u8, iter_var_id as u8);
+                self.emit_byte(OpCode::Pop as u8);
+                // and check if it equals nil
+                self.emit_bytes(OpCode::GetLocal as u8, iter_var_id as u8);
+                self.emit_byte(OpCode::Nil as u8);
+                self.emit_bytes(OpCode::Equal as u8, OpCode::Not as u8);
+
+                let end_jump = self.emit_jump(OpCode::JumpIfFalse as u8);
+                self.emit_byte(OpCode::Pop as u8); // condition
+                self.emit_loop(loop_start);
+                self.patch_jump(end_jump);
+                self.emit_byte(OpCode::Pop as u8); // condition
+
+                self.end_scope();
+                return;
+            }
         } else {
             self.expression_statement();
         }
